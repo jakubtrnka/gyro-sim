@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let initial = InitialState {
         joints: JointState {
-            rates: [0.0, rpm_to_rad_s(rpm)],
+            rates: [0.0, rpm_to_rad_s(rpm), 0.0],
             ..JointState::default()
         },
         drive: DriveState {
@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             rate_rad_s: yaw_rate.to_radians(),
             ..YawRateProfile::default()
         }),
+        ..InitialState::default()
     };
     let mut sim = Simulation::new(config, initial)?;
     let stdout = io::stdout();

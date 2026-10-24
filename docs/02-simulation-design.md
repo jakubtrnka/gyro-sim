@@ -2,7 +2,7 @@
 
 Implementation specification · 24 October 2026
 
-This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). The first native implementation stage is complete: `gyro-core` implements the one-gimbal mechanism, general instantaneous housing kinematics, fixed/prescribed-yaw runs, RK4 integration, motor/coast controls, and work/energy diagnostics. See the [project README](../README.md) for commands and reproducible tests. Two-gimbal presets, the manual housing follower and command replay, WASM/browser presentation, the server, and Nix packaging remain to be implemented. The [original paper](../gyroscope-simulation-design.md) remains available as background.
+This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). Both native implementation stages are complete: `gyro-core` implements all three mechanisms, general housing kinematics, analytic yaw/pitch/roll inputs, a coupled manual follower, motor/coast controls, instrument and work/energy diagnostics, and deterministic command replay. See the [project README](../README.md) for commands and reproducible tests. WASM/browser presentation is next; the server and Nix packaging follow. The [original paper](../gyroscope-simulation-design.md) remains available as background.
 
 ## 1. Intended behavior and scope
 
@@ -98,7 +98,7 @@ Switching modes or reversing the target must preserve angles and rates. Never cl
 
 ### 4.1 Data contract
 
-The following names describe the target public interface. Use enums and fixed-capacity internal storage in Rust; serialize readable objects at the WASM boundary using `serde` and `serde-wasm-bindgen`. The native first stage implements the one-gimbal subset: `SimulationConfig`, `InitialState`, `HousingSample`, and owned `Snapshot` values, with immediate between-step motor controls. `Command`, `CommandRecord`, heading controls, and multi-preset configuration are deferred to the second stage; there is no placeholder implementation of those features.
+The native interface now implements the following types using enums and fixed-capacity storage. `SimulationConfig::for_preset` and `InitialState::for_preset` construct matching presets. Joint arrays have three slots: `[theta, psi, 0]` or `[alpha, beta, psi]`; the unused turn-indicator slot must be zero. Component poses follow chain order with identity in an unused slot. The WASM stage will serialize readable objects using `serde` and `serde-wasm-bindgen`; no serialization dependency is needed in the current native crate.
 
 | Type | Required content |
 |---|---|
@@ -116,23 +116,28 @@ Include the last two accepted snapshots in a batch-advance result for display in
 
 ### 4.2 Operations and time ownership
 
-The intended API shape is:
+The native API shape is:
 
 ```rust
-// Interface sketch; not executable source in this documentation deliverable.
+// Signature summary; see gyro-core for executable definitions.
 Simulation::new(config, initial) -> Result<Simulation, SimulationError>
-Simulation::enqueue(record) -> Result<(), SimulationError>
+Simulation::queue(command) -> Result<CommandRecord, SimulationError>
+Simulation::enqueue(record) -> Result<CommandRecord, SimulationError>
 Simulation::step() -> Result<Snapshot, SimulationError>
 Simulation::advance_steps(count) -> Result<AdvanceResult, SimulationError>
 Simulation::snapshot() -> Snapshot
 Simulation::reset(initial) -> Result<Snapshot, SimulationError>
+Simulation::replay() -> Replay
+Simulation::from_replay(&replay) -> Result<Simulation, SimulationError>
 ```
 
 `gyro-wasm` exposes equivalent operations on a `GyroSimulation` object. The core has no concept of “real time” or “paused”; it advances only when called. The browser owns start/pause and converts wall-clock elapsed time into an integer number of steps.
 
 Commands execute in sequence order immediately before their designated step. Reject records for already completed steps and duplicate sequence numbers at the same step. Live events are assigned to the next unstarted step and recorded after that assignment. Same-step housing-target updates may be coalesced to the last target before logging; mode/target changes must retain their order. Stepping uses no ambient clock or random input.
 
-A replay contains a format version, config, initial state, and ordered command records. Because a run's step size is fixed, a step index is an exact timestamp within that run; displayed time is `step_index * dt`. Configuration changes that alter `dt` begin a new run. Start/pause and camera changes do not affect the physical replay, while an input received during a pause is recorded at the next physical step.
+A replay contains a format version, config, initial state, ordered command records, and `end_step` (the number of completed steps). Pending/future commands are retained. The native `Replay` is an owned Rust value, not yet a JSON/file format. Raw valid target quaternion inputs are retained in the log and canonicalized at execution, avoiding repeated normalization changing replay rounding. Because a run's step size is fixed, a step index is an exact timestamp within that run; displayed time is `step_index * dt`. Configuration changes that alter `dt` begin a new run. Start/pause and camera changes do not affect the physical replay, while an input received during a pause is recorded at the next physical step.
+
+Compared with stage 1, `set_target_spin` and `set_drive_mode` now return queued command records, not immediately updated snapshots. Commands, the follower controller, and the step commit atomically. A zero-size batch applies nothing. Reset clears the command log as well as state/work.
 
 ### 4.3 Validation and failure behavior
 
@@ -184,6 +189,8 @@ Join the end to constant-rate and symmetric ramp-down segments. Use a default $3
 
 Launch a built-in experiment through an explicit reset-to-experiment action with its documented initial state. Require profile segment durations to be whole multiples of `dt` so joins fall on step boundaries. Native tests may supply longer holds and smaller amplitudes. Returning from a running profile to manual control retains the current housing pose/rate, targets its current pose, and smoothly brings it to rest.
 
+Native `StartManeuver` also permits starting a script relative to the current housing pose once the housing is at rest (rate norm at most $10^{-10}$ rad/s). If it is moving, execution fails without applying any commands or state from that step; reset before retrying a queued invalid transition. `StopHousing` provides the smooth handover to a target at the current pose. `SetHousingTarget` may take over a running script while preserving pose/rate. Ordinary mouse release needs no command and leaves the last target unchanged. `ExcursionProfile` uses a quintic angle trajectory with zero velocity and acceleration at each join.
+
 ## 6. Integration, clocks, and playback
 
 ### 6.1 Fixed-step dynamics
@@ -192,7 +199,7 @@ Start with classical fourth-order Runge–Kutta and a fixed `dt` for each run. U
 
 Axisymmetry removes the need to resolve rotor phase merely to determine spindle motion. It does not remove fast nutation, spring modes, or motor/follower response times. The illustrative two-gimbal nutation frequency is about 140 Hz, so a display interval such as 1/60 s is not an acceptable physics step.
 
-Use **1/16,384 s as a development trial step**, then validate and choose the release default through the convergence procedure in Section 9. This value is not a certified operating limit. Test each supported preset over the offered parameter range, especially high spin and low gimbal inertia. If explicit integration is too expensive for that range, narrow the supported range or evaluate an implicit/structure-preserving solver before release. Do not introduce an unlabelled high-spin approximation.
+The validated native fixture defaults are **1/16,384 s for the turn indicator and 1/32,768 s for attitude/DG**. The latter is a conservative choice checked by the Section 9 procedure, not a claim that the original 1/16,384 s trial fails or that the selected step is necessary. Neither is a certified operating limit. Test each supported preset over the offered parameter range, especially high spin and low gimbal inertia. If explicit integration is too expensive for that range, narrow the supported range or evaluate an implicit/structure-preserving solver before release. Do not introduce an unlabelled high-spin approximation.
 
 Retain unwrapped mechanical gimbal coordinates; a spring acts on the actual joint displacement. Rendering may reduce angles modulo $2\pi$. Spin phase can remain unwrapped in state for the initial implementation, with range reduction only for rendering; it is absent from the dynamics coefficients.
 
@@ -359,7 +366,7 @@ For smooth fixed-input runs, compute trajectories at `dt`, `dt/2`, and `dt/4`, c
 
 For selecting the offered default step, compare a 10 s manoeuvre at `dt` with `dt/2`: require maximum gimbal/spindle orientation difference below $10^{-4}$ rad and gimbal-rate difference below $10^{-3}$ rad/s. Repeat a 60 s conservative run to expose accumulated drift. For that run require relative $h$ and $p_\alpha$ errors below $10^{-6}$ using nonzero reference scales, and energy error below $10^{-10}$ J plus $10^{-4}$ times initial dynamic energy $E-h^2/(2I_s)$. Record absolute errors too.
 
-These are proposed acceptance targets, not results already achieved. Reduce `dt` or revise the supported parameter envelope based on measured convergence. In particular, do not normalize gimbal-energy error only by the large rotor spin energy.
+These native targets now pass for the retained fixtures described in Section 9.4; they do not establish an arbitrary-parameter operating envelope. Reduce `dt` or revise the supported parameter envelope based on measured convergence. In particular, do not normalize gimbal-energy error only by the large rotor spin energy.
 
 Given identical config, initial conditions, and commands, native and WASM snapshots at the same step must agree within `abs_tol + 1e-8 * max(abs(native), abs(wasm))`. Begin with absolute tolerances of $10^{-8}$ rad for joint angles, $10^{-7}$ rad/s for rates, $10^{-10}$ J for energy, and $10^{-10}$ N m s for momentum; compare orientations by angular distance rather than quaternion signs. A 10 s fixture should satisfy these before longer runs are added. Bitwise identity across platforms is not required.
 
@@ -379,12 +386,14 @@ Benchmark the trial step with every preset, record hardware/browser and actual a
 
 ### 9.4 Evidence status
 
-The original paper reports numerical checks, but their code and fixtures are not present. Those historical claims are separate from the new [native physics tests](../crates/gyro-core/tests/physics.rs) and [lifecycle tests](../crates/gyro-core/tests/lifecycle.rs), which are retained with the implementation. The first stage passes its exact-reference, motor/coast, and small-rate-response exit criteria, as well as conservation, convergence, and energy-work checks. See the [README](../README.md#verify-the-implementation) for commands and reference measurements. These native results do not establish browser performance, WASM parity, two-gimbal behavior, or a general validated operating envelope.
+The original paper reports numerical checks, but its code and fixtures are not present. New evidence is retained in [one-gimbal physics tests](../crates/gyro-core/tests/physics.rs), [two-gimbal tests](../crates/gyro-core/tests/two_gimbal.rs), [independent moving-housing energy tests](../crates/gyro-core/tests/energy_reference.rs), their [test-only differentiation oracle](../crates/gyro-core/tests/support/mod.rs), [control/replay tests](../crates/gyro-core/tests/controls.rs), and [lifecycle tests](../crates/gyro-core/tests/lifecycle.rs).
+
+Stages 1 and 2 pass their exact-reference, independent-energy, drive/coast, nutation, conservation, convergence, work-balance and replay criteria. The two-gimbal 60 s fixtures check energy against initial dynamic energy, plus both $h$ and $p_\alpha$; conservation maxima are sampled every 0.5 s. Nine 10 s fixtures compare the three presets under yaw, pitch and roll with nonzero initial gimbal motion, sampling differences at 256 Hz. Manual control tests cover finite acceleration, unit quaternions, rate monitoring, deterministic shortest paths including exactly $\pi$, work balance, script handover, and atomic failure. See the [README](../README.md#verify-the-implementation) for commands and measured values. Native same-build replay matches complete snapshots exactly across step batching. This does not yet establish browser performance, native/WASM parity, or a general validated operating envelope.
 
 ## 10. Implementation sequence and exit criteria
 
-1. **One-gimbal native core:** implement shared kinematics/dynamics, integration, drive, and analytic yaw input. Exit when the exact one-gimbal reference, motor/coast, and small-rate response tests pass.
-2. **Two-gimbal and arbitrary motion:** add the other chains, manual housing follower, diagnostics, and replay. Exit when the fixed-housing reference, independent moving-housing checks, conservation, and convergence criteria pass for the selected presets.
+1. **One-gimbal native core — complete:** shared kinematics/dynamics, integration, drive, and analytic yaw input. Exact one-gimbal reference, motor/coast, and small-rate response tests pass.
+2. **Two-gimbal and arbitrary motion — complete:** other chains, manual housing follower, diagnostics, and native replay. Fixed-housing reference, independent moving-housing checks, conservation, and convergence criteria pass for the selected fixtures.
 3. **WASM and browser:** expose the agreed interface, build the mechanism/dials/controls, and add lifecycle behavior. Exit when native/WASM parity, input/frame-rate independence, and browser acceptance cases pass.
 4. **Server and Nix package:** build pinned native/WASM/web outputs and package their assets. Exit when the flake checks pass and the complete application runs through `nix run` without external runtime dependencies.
 5. **Later educational extensions:** specify and validate each added physical mechanism separately, including its new inputs and experiments. Erection and acceleration effects require a physical sensing model; Earth/transport effects require an extended reference-frame model.

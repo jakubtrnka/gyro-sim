@@ -26,8 +26,8 @@ fn reference(
     omega_body: [f64; 3],
     alpha_body: [f64; 3],
 ) -> ([f64; 2], f64) {
-    let [theta, _] = state.angles;
-    let [u, spin] = state.rates;
+    let [theta, _, _] = state.angles;
+    let [u, spin, _] = state.rates;
     let (s, c) = theta.sin_cos();
     let b = omega_body[1] * c + omega_body[2] * s;
     let z = -omega_body[1] * s + omega_body[2] * c;
@@ -96,7 +96,7 @@ fn general_dynamics_match_independent_lagrangian_reference() {
     let mut worst: f64 = 0.0;
     for case in 0..1000 {
         let state = JointState {
-            angles: [random(&mut seed, 3.0), random(&mut seed, 10.0)],
+            angles: [random(&mut seed, 3.0), random(&mut seed, 10.0), 0.0],
             rates: [
                 random(&mut seed, 3.0),
                 if case % 10 == 0 {
@@ -104,6 +104,7 @@ fn general_dynamics_match_independent_lagrangian_reference() {
                 } else {
                     random(&mut seed, 1500.0)
                 },
+                0.0,
             ],
         };
         let drive = DriveState {
@@ -148,8 +149,8 @@ fn general_dynamics_match_independent_lagrangian_reference() {
 fn spin_phase_does_not_change_axisymmetric_dynamics() {
     let model = Model::new(SimulationConfig::default()).unwrap();
     let state = JointState {
-        angles: [0.7, 0.0],
-        rates: [-0.2, 1300.0],
+        angles: [0.7, 0.0, 0.0],
+        rates: [-0.2, 1300.0, 0.0],
     };
     let housing = HousingSample {
         angular_velocity: [0.1, 0.2, 0.3],
@@ -161,7 +162,7 @@ fn spin_phase_does_not_change_axisymmetric_dynamics() {
     let b = model
         .evaluate(
             JointState {
-                angles: [0.7, 98765.4],
+                angles: [0.7, 98765.4, 0.0],
                 ..state
             },
             housing,
@@ -183,7 +184,7 @@ fn small_yaw_response_spin_reversal_lower_speed_and_zero_spin() {
         let spin = rpm_to_rad_s(rpm);
         let initial = InitialState {
             joints: JointState {
-                rates: [0.0, spin],
+                rates: [0.0, spin, 0.0],
                 ..JointState::default()
             },
             drive: DriveState {
@@ -194,6 +195,7 @@ fn small_yaw_response_spin_reversal_lower_speed_and_zero_spin() {
                 rate_rad_s: 0.3_f64.to_radians(),
                 ..YawRateProfile::default()
             }),
+            ..InitialState::default()
         };
         let mut sim = Simulation::new(config, initial).unwrap();
         let settled = advance(&mut sim, 5.0);
@@ -213,14 +215,15 @@ fn coast_conserves_axial_momentum_under_housing_motion() {
     };
     let initial = InitialState {
         joints: JointState {
-            angles: [0.2, 0.0],
-            rates: [0.1, rpm_to_rad_s(12_000.0)],
+            angles: [0.2, 0.0, 0.0],
+            rates: [0.1, rpm_to_rad_s(12_000.0), 0.0],
         },
         drive: DriveState {
             mode: DriveMode::Coast,
             ..DriveState::default()
         },
         housing: HousingMotion::YawRate(YawRateProfile::default()),
+        ..InitialState::default()
     };
     let mut sim = Simulation::new(config, initial).unwrap();
     let h0 = sim.snapshot().diagnostics.axial_momentum;
@@ -278,7 +281,7 @@ fn unsaturated_motor_has_predicted_time_constant() {
     };
     let initial = InitialState {
         joints: JointState {
-            rates: [0.0, DriveState::default().target_spin - 5.0],
+            rates: [0.0, DriveState::default().target_spin - 5.0, 0.0],
             ..JointState::default()
         },
         ..InitialState::default()
@@ -302,7 +305,7 @@ fn motor_saturation_and_reversal_preserve_continuous_state() {
     };
     let initial = InitialState {
         joints: JointState {
-            rates: [0.0; 2],
+            rates: [0.0; 3],
             ..JointState::default()
         },
         ..InitialState::default()
@@ -326,11 +329,12 @@ fn motor_saturation_and_reversal_preserve_continuous_state() {
     sim.set_drive_mode(DriveMode::Coast).unwrap();
     assert_eq!(sim.snapshot().joints, before.joints);
     assert_eq!(sim.snapshot().work, before.work);
-    assert_eq!(sim.snapshot().diagnostics.motor_torque, 0.0);
+    assert_eq!(sim.snapshot(), before); // Queued until the next physical step.
+    assert_eq!(sim.step().unwrap().diagnostics.motor_torque, 0.0);
 
     let reversing = InitialState {
         joints: JointState {
-            rates: [0.0, 10.0],
+            rates: [0.0, 10.0, 0.0],
             ..JointState::default()
         },
         drive: DriveState {
@@ -361,7 +365,7 @@ fn oscillator(dt: f64) -> Simulation {
     };
     let initial = InitialState {
         joints: JointState {
-            angles: [0.2, 0.0],
+            angles: [0.2, 0.0, 0.0],
             ..JointState::default()
         },
         drive: DriveState {
@@ -418,8 +422,8 @@ fn conservative_energy_and_axial_momentum_survive_sixty_seconds() {
 fn housing_reaction_during_motor_drive_satisfies_power_balance() {
     let model = Model::new(SimulationConfig::default()).unwrap();
     let state = JointState {
-        angles: [0.3, 1.0],
-        rates: [0.4, 100.0],
+        angles: [0.3, 1.0, 0.0],
+        rates: [0.4, 100.0, 0.0],
     };
     let housing = HousingSample {
         angular_velocity: [0.3, -0.7, 0.2],

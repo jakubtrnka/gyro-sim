@@ -9,6 +9,7 @@ pub(crate) type Mat3 = [[f64; 3]; 3];
 pub(crate) const ZERO: Vec3 = [0.0; 3];
 pub(crate) const X: Vec3 = [1.0, 0.0, 0.0];
 pub(crate) const Y: Vec3 = [0.0, 1.0, 0.0];
+pub(crate) const Z: Vec3 = [0.0, 0.0, 1.0];
 pub(crate) const IDENTITY: Quat = [0.0, 0.0, 0.0, 1.0];
 
 pub(crate) fn add(a: Vec3, b: Vec3) -> Vec3 {
@@ -98,34 +99,111 @@ pub(crate) fn axial_inertia(spindle: Vec3, axial: f64, transverse: f64) -> Mat3 
     })
 }
 
-/// Checked Cholesky solve, with a scale-independent infinity-norm condition estimate.
-pub(crate) fn solve_spd(
-    m: [[f64; 2]; 2],
-    rhs: [f64; 2],
-) -> Result<([f64; 2], f64), SimulationError> {
+pub(crate) fn conjugate(q: Quat) -> Quat {
+    [-q[0], -q[1], -q[2], q[3]]
+}
+
+pub(crate) fn norm(v: Vec3) -> f64 {
+    v[0].hypot(v[1]).hypot(v[2])
+}
+
+pub(crate) fn clip_norm(v: Vec3, limit: f64) -> Vec3 {
+    let length = norm(v);
+    if length.is_infinite() && v.iter().all(|x| x.is_finite()) {
+        let largest = v.iter().map(|x| x.abs()).fold(0.0, f64::max);
+        let direction = v.map(|x| x / largest);
+        return scale(direction, limit / norm(direction));
+    }
+    if length > limit {
+        scale(v, limit / length)
+    } else {
+        v
+    }
+}
+
+/// Canonical unit quaternion; deterministic axis-sign tie break at exactly pi.
+pub(crate) fn canonical(q: Quat) -> Result<Quat, SimulationError> {
+    let q = normalize_quaternion(q)?;
+    let flip =
+        q[3] < 0.0 || (q[3] == 0.0 && q[..3].iter().find(|x| **x != 0.0).is_some_and(|x| *x < 0.0));
+    Ok(if flip { q.map(|x| -x) } else { q })
+}
+
+pub(crate) fn rotation_error(target: Quat, actual: Quat) -> Result<Vec3, SimulationError> {
+    let q = canonical(quat_mul(target, conjugate(actual)))?;
+    let v = [q[0], q[1], q[2]];
+    let n = norm(v);
+    Ok(if n < 1e-12 {
+        scale(v, 2.0)
+    } else {
+        scale(v, 2.0 * n.atan2(q[3]) / n)
+    })
+}
+
+/// Checked Cholesky solve of the active 2x2 or 3x3 block, scaled before factoring.
+#[allow(clippy::needless_range_loop)] // Matrix indices make the triangular solves explicit.
+pub(crate) fn solve_spd(m: Mat3, rhs: Vec3, n: usize) -> Result<(Vec3, f64), SimulationError> {
     let fail = || SimulationError::numerical("mass matrix is not finite positive definite");
     if !m.iter().flatten().chain(rhs.iter()).all(|v| v.is_finite()) || m[0][0] <= 0.0 {
         return Err(fail());
     }
-    let l00 = m[0][0].sqrt();
-    let l10 = m[1][0] / l00;
-    let remaining = m[1][1] - l10 * l10;
-    if remaining <= 0.0 || !remaining.is_finite() {
-        return Err(fail());
+    let largest = (0..n).map(|i| m[i][i]).fold(0.0, f64::max);
+    let scaled = m.map(|r| r.map(|x| x / largest));
+    let mut l = [[0.0; 3]; 3];
+    for i in 0..n {
+        for j in 0..=i {
+            let value = scaled[i][j] - (0..j).map(|k| l[i][k] * l[j][k]).sum::<f64>();
+            l[i][j] = if i == j {
+                if value <= 0.0 || !value.is_finite() {
+                    return Err(fail());
+                }
+                value.sqrt()
+            } else {
+                value / l[j][j]
+            };
+        }
     }
-    let l11 = remaining.sqrt();
-    let y0 = rhs[0] / l00;
-    let y1 = (rhs[1] - l10 * y0) / l11;
-    let x1 = y1 / l11;
-    let x0 = (y0 - l10 * x1) / l00;
-    let largest = m[0][0].max(m[1][1]);
-    let (a, b, c) = (m[0][0] / largest, m[0][1] / largest, m[1][1] / largest);
-    let norm = (a + b.abs()).max(c + b.abs());
-    let condition = norm * norm / (a * c - b * b);
-    if ![x0, x1, condition].iter().all(|x| x.is_finite()) {
+    let solve = |b: Vec3| {
+        let mut x = ZERO;
+        for i in 0..n {
+            x[i] = (b[i] - (0..i).map(|j| l[i][j] * x[j]).sum::<f64>()) / l[i][i];
+        }
+        for i in (0..n).rev() {
+            x[i] = (x[i] - (i + 1..n).map(|j| l[j][i] * x[j]).sum::<f64>()) / l[i][i];
+        }
+        x
+    };
+    let x = solve(rhs.map(|v| v / largest));
+    let mut inverse_row_sums = ZERO;
+    for j in 0..n {
+        let mut unit = ZERO;
+        unit[j] = 1.0;
+        let column = solve(unit);
+        for i in 0..n {
+            inverse_row_sums[i] += column[i].abs();
+        }
+    }
+    let matrix_norm = scaled
+        .iter()
+        .take(n)
+        .map(|r| r.iter().take(n).map(|x| x.abs()).sum::<f64>())
+        .fold(0.0, f64::max);
+    let condition = matrix_norm * inverse_row_sums.into_iter().fold(0.0, f64::max);
+    if !x.iter().chain([condition].iter()).all(|x| x.is_finite()) {
         return Err(SimulationError::numerical(
             "linear solve overflow or ill conditioning",
         ));
     }
-    Ok(([x0, x1], condition))
+    Ok((x, condition))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn norm_clipping_preserves_direction_when_unscaled_length_overflows() {
+        let clipped = super::clip_norm([1.7e308, -1.7e308, 1.7e308], 2.0);
+        assert!((super::norm(clipped) - 2.0).abs() < 1e-14);
+        assert_eq!(clipped[0], -clipped[1]);
+        assert_eq!(clipped[0], clipped[2]);
+    }
 }

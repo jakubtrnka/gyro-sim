@@ -1,7 +1,7 @@
 //! Native, deterministic gyroscope dynamics with no browser or clock dependency.
 //!
-//! This first implementation supports the one-gimbal turn indicator. Coordinates
-//! are `[gimbal_angle, rotor_phase]`; all quantities use SI units. Aircraft axes
+//! Supports turn-indicator, attitude and directional mechanisms. Coordinates
+//! are `[theta, psi, 0]` or `[alpha, beta, psi]`; all quantities use SI units. Aircraft axes
 //! are x forward, y right, z down. Quaternions use `[x, y, z, w]` Hamilton order
 //! and map local component coordinates to world coordinates.
 //!
@@ -15,18 +15,24 @@
 //! # Ok::<(), gyro_core::SimulationError>(())
 //! ```
 
+mod commands;
 mod dynamics;
 mod housing;
 mod math;
 mod simulation;
 mod types;
 
+pub use commands::{Command, CommandRecord, Replay};
 pub use dynamics::Model;
-pub use housing::{HousingMotion, HousingSample, YawRateProfile};
+pub use housing::{
+    Axis, ExcursionProfile, HousingControllerConfig, HousingMotion, HousingSample, Maneuver,
+    YawRateProfile,
+};
 pub use simulation::Simulation;
 pub use types::{
-    AdvanceResult, Diagnostics, DriveMode, DriveState, Evaluation, InitialState, JointState,
-    MotorConfig, RotorInertia, SimulationConfig, SimulationError, Snapshot, Work,
+    AdvanceResult, Diagnostics, DriveMode, DriveState, Evaluation, InitialState, InstrumentReading,
+    JointState, MotorConfig, Preset, RotorInertia, SimulationConfig, SimulationError, Snapshot,
+    Work,
 };
 
 /// Convert bearing-relative RPM to radians per second.

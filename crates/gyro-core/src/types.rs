@@ -1,4 +1,4 @@
-use crate::{HousingMotion, HousingSample, rpm_to_rad_s};
+use crate::{HousingControllerConfig, HousingMotion, HousingSample, rpm_to_rad_s};
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,14 +55,53 @@ pub struct MotorConfig {
     pub spin_damping: f64,
 }
 
-/// Parameters of the one-gimbal x/y turn-indicator mechanism, in SI units.
+/// Serial joint axes are expressed in each joint's parent frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Preset {
+    #[default]
+    TurnIndicator,
+    Attitude,
+    Directional,
+}
+
+impl Preset {
+    pub fn joint_count(self) -> usize {
+        match self {
+            Self::TurnIndicator => 2,
+            _ => 3,
+        }
+    }
+
+    pub fn spin_index(self) -> usize {
+        self.joint_count() - 1
+    }
+
+    pub(crate) fn axes(self) -> [[f64; 3]; 3] {
+        use crate::math::{X, Y, Z, ZERO};
+        match self {
+            Self::TurnIndicator => [X, Y, ZERO],
+            Self::Attitude => [X, Y, Z],
+            Self::Directional => [Z, X, Y],
+        }
+    }
+}
+
+/// Mechanism and interaction parameters in SI units; immutable during a run.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SimulationConfig {
+    pub preset: Preset,
     pub rotor: RotorInertia,
+    /// Sole gimbal for TurnIndicator; outer gimbal for the two-gimbal presets.
     pub gimbal_inertia: [f64; 3],
+    pub inner_gimbal_inertia: [f64; 3],
     pub spring_stiffness: f64,
     pub gimbal_damping: f64,
+    pub inner_spring_stiffness: f64,
+    pub inner_gimbal_damping: f64,
     pub motor: MotorConfig,
+    pub housing_controller: HousingControllerConfig,
+    /// Positive calibration momentum for the turn-rate dial, not measured spin.
+    pub nominal_axial_momentum: f64,
     pub step_seconds: f64,
 }
 
@@ -72,21 +111,64 @@ impl Default for SimulationConfig {
         let transverse = 1.5625e-5;
         let spring_stiffness = axial * rpm_to_rad_s(12_000.0) * 0.3;
         Self {
+            preset: Preset::TurnIndicator,
             rotor: RotorInertia { axial, transverse },
             gimbal_inertia: [2e-5; 3],
+            inner_gimbal_inertia: [2e-5; 3],
             spring_stiffness,
             gimbal_damping: 2.0 * 0.7 * ((2e-5 + transverse) * spring_stiffness).sqrt(),
+            inner_spring_stiffness: 0.0,
+            inner_gimbal_damping: 0.0,
             motor: MotorConfig {
                 gain: axial / 0.5,
                 torque_limit: 0.005,
                 spin_damping: 0.0,
             },
+            housing_controller: HousingControllerConfig::default(),
+            nominal_axial_momentum: axial * rpm_to_rad_s(12_000.0),
             step_seconds: 1.0 / 16_384.0,
         }
     }
 }
 
 impl SimulationConfig {
+    pub fn for_preset(preset: Preset) -> Self {
+        if preset == Preset::TurnIndicator {
+            return Self::default();
+        }
+        Self {
+            preset,
+            spring_stiffness: 0.0,
+            gimbal_damping: 0.0,
+            step_seconds: 1.0 / 32_768.0,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn stiffness(self) -> [f64; 3] {
+        [
+            self.spring_stiffness,
+            if self.preset.joint_count() == 3 {
+                self.inner_spring_stiffness
+            } else {
+                0.0
+            },
+            0.0,
+        ]
+    }
+
+    pub(crate) fn damping(self) -> [f64; 3] {
+        [
+            self.gimbal_damping,
+            if self.preset.joint_count() == 3 {
+                self.inner_gimbal_damping
+            } else {
+                0.0
+            },
+            0.0,
+        ]
+    }
+
     pub fn validate(&self) -> Result<(), SimulationError> {
         let inertia_valid = |i: [f64; 3]| {
             if !i.iter().all(|v| v.is_finite() && *v > 0.0) {
@@ -99,6 +181,7 @@ impl SimulationConfig {
             })
         };
         if !inertia_valid(self.gimbal_inertia)
+            || !inertia_valid(self.inner_gimbal_inertia)
             || !inertia_valid([
                 self.rotor.transverse,
                 self.rotor.axial,
@@ -112,6 +195,8 @@ impl SimulationConfig {
         if ![
             self.spring_stiffness,
             self.gimbal_damping,
+            self.inner_spring_stiffness,
+            self.inner_gimbal_damping,
             self.motor.gain,
             self.motor.torque_limit,
             self.motor.spin_damping,
@@ -128,6 +213,12 @@ impl SimulationConfig {
                 "step size must be finite and positive",
             ));
         }
+        if !self.nominal_axial_momentum.is_finite() || self.nominal_axial_momentum <= 0.0 {
+            return Err(SimulationError::InvalidConfiguration(
+                "nominal momentum must be finite and positive",
+            ));
+        }
+        self.housing_controller.validate()?;
         Ok(())
     }
 }
@@ -166,22 +257,52 @@ impl DriveState {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JointState {
-    /// `[theta, psi]`, unwrapped radians.
-    pub angles: [f64; 2],
-    /// `[theta_dot, psi_dot]`, radians per second relative to each joint's parent.
-    pub rates: [f64; 2],
+    /// `[theta, psi, 0]` or `[alpha, beta, psi]`, unwrapped radians.
+    pub angles: [f64; 3],
+    /// Relative to each joint's parent. Unused TurnIndicator slot must be zero.
+    pub rates: [f64; 3],
 }
 
 impl Default for JointState {
     fn default() -> Self {
         Self {
-            angles: [0.0; 2],
-            rates: [0.0, rpm_to_rad_s(12_000.0)],
+            angles: [0.0; 3],
+            rates: [0.0, rpm_to_rad_s(12_000.0), 0.0],
         }
     }
 }
 
 impl JointState {
+    pub fn for_preset(preset: Preset) -> Self {
+        let mut state = Self {
+            angles: [0.0; 3],
+            rates: [0.0; 3],
+        };
+        state.rates[preset.spin_index()] = rpm_to_rad_s(12_000.0);
+        state
+    }
+
+    pub fn turn_indicator(angles: [f64; 2], rates: [f64; 2]) -> Self {
+        Self {
+            angles: [angles[0], angles[1], 0.0],
+            rates: [rates[0], rates[1], 0.0],
+        }
+    }
+
+    pub(crate) fn validate(self, preset: Preset) -> Result<(), SimulationError> {
+        if !self.is_finite() {
+            return Err(SimulationError::InvalidInput(
+                "joint angles and rates must be finite",
+            ));
+        }
+        if preset == Preset::TurnIndicator && (self.angles[2] != 0.0 || self.rates[2] != 0.0) {
+            return Err(SimulationError::InvalidInput(
+                "unused turn-indicator joint must be zero",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn is_finite(self) -> bool {
         self.angles
             .iter()
@@ -196,6 +317,32 @@ pub struct InitialState {
     pub drive: DriveState,
     /// Prescribed motion starts at simulation time zero, including after reset.
     pub housing: HousingMotion,
+    /// Display offset only: does not torque or reset the DG mechanism.
+    pub heading_offset: f64,
+}
+
+impl InitialState {
+    pub fn for_preset(preset: Preset) -> Self {
+        Self {
+            joints: JointState::for_preset(preset),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum InstrumentReading {
+    TurnIndicator {
+        deflection: f64,
+        indicated_rate: f64,
+    },
+    Attitude {
+        pitch: f64,
+        bank: Option<f64>,
+    },
+    Directional {
+        heading: f64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -214,6 +361,9 @@ pub struct Diagnostics {
     pub motor_power: f64,
     pub dissipated_power: f64,
     pub mass_condition: f64,
+    pub generalized_momenta: [f64; 3],
+    pub near_axis_alignment: bool,
+    pub poorly_conditioned: bool,
 }
 
 impl Diagnostics {
@@ -224,9 +374,9 @@ impl Diagnostics {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Evaluation {
-    pub accelerations: [f64; 2],
-    /// World-from-gimbal and world-from-rotor quaternions in xyzw order.
-    pub component_orientations: [[f64; 4]; 2],
+    pub accelerations: [f64; 3],
+    /// World-from-body, in chain order; unused slot is identity. Quaternions: xyzw.
+    pub component_orientations: [[f64; 4]; 3],
     pub diagnostics: Diagnostics,
 }
 
@@ -240,13 +390,18 @@ pub struct Work {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Snapshot {
+    pub preset: Preset,
     /// Number of completed steps. Physical time is exactly this index times dt.
     pub step_index: u64,
     pub time_seconds: f64,
     pub joints: JointState,
     pub drive: DriveState,
     pub housing: HousingSample,
-    pub component_orientations: [[f64; 4]; 2],
+    pub component_orientations: [[f64; 4]; 3],
+    pub housing_target: Option<[f64; 4]>,
+    pub housing_rate_exceeded: bool,
+    pub heading_offset: f64,
+    pub instrument: InstrumentReading,
     pub diagnostics: Diagnostics,
     pub work: Work,
     /// E - E_initial - (housing_work + motor_work - dissipated_work).

@@ -116,7 +116,7 @@ fn invalid_configuration_and_input_are_rejected() {
     for initial in [
         InitialState {
             joints: JointState {
-                angles: [f64::NAN, 0.0],
+                angles: [f64::NAN, 0.0, 0.0],
                 ..JointState::default()
             },
             ..InitialState::default()
@@ -192,7 +192,7 @@ fn failed_updates_and_failed_steps_leave_state_unchanged() {
     assert_eq!(sim.snapshot(), before);
     let invalid = InitialState {
         joints: JointState {
-            rates: [0.0, f64::INFINITY],
+            rates: [0.0, f64::INFINITY, 0.0],
             ..JointState::default()
         },
         ..InitialState::default()
@@ -206,7 +206,7 @@ fn failed_updates_and_failed_steps_leave_state_unchanged() {
     };
     let initial = InitialState {
         joints: JointState {
-            angles: [0.2, 0.0],
+            angles: [0.2, 0.0, 0.0],
             ..JointState::default()
         },
         ..InitialState::default()
