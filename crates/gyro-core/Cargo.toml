@@ -5,6 +5,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"], optional = true }
+
 [lints]
 workspace = true
 

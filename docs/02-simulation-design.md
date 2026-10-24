@@ -2,7 +2,7 @@
 
 Implementation specification · 24 October 2026
 
-This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). Both native implementation stages are complete: `gyro-core` implements all three mechanisms, general housing kinematics, analytic yaw/pitch/roll inputs, a coupled manual follower, motor/coast controls, instrument and work/energy diagnostics, and deterministic command replay. See the [project README](../README.md) for commands and reproducible tests. WASM/browser presentation is next; the server and Nix packaging follow. The [original paper](../gyroscope-simulation-design.md) remains available as background.
+This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). Stages 1–3 are implemented: `gyro-core` supplies all three mechanisms and deterministic replay; `gyro-wasm` exposes that solver to the interactive Three.js browser lab. The small Axum asset server was brought forward to test the production bundle. Nix packaging remains next. See the [project README](../README.md) for build commands, controls and reproducible evidence. The [original paper](../gyroscope-simulation-design.md) remains available as background.
 
 ## 1. Intended behavior and scope
 
@@ -35,7 +35,7 @@ flowchart LR
 | `gyro-server` | Axum/Tokio listener and static-file serving with `tower-http` | Simulation sessions or a server-side simulation loop |
 | Nix flake | Pinned toolchain, native/WASM/web builds, test environment, runnable package | Runtime network dependency fetching |
 
-Use a Cargo workspace with `crates/gyro-core`, `crates/gyro-wasm`, and `crates/gyro-server`; keep the browser project under `web`. `gyro-core` uses ordinary Rust and `f64` mathematics with no browser dependencies. The native first stage implements the required small vector, quaternion, and matrix operations directly and has no external dependencies. A general-purpose rigid-body engine is unnecessary.
+The Cargo workspace contains `crates/gyro-core`, `crates/gyro-wasm`, and `crates/gyro-server`; the browser project is under `web`. `gyro-core` uses ordinary Rust and `f64` mathematics with no browser dependencies. It implements the small vector, quaternion, and matrix operations directly and has no external dependencies with default features. Its optional `serde` feature provides the shared boundary schema; it does not change the dynamics. A general-purpose rigid-body engine is unnecessary.
 
 Use TypeScript and Three.js for the scene, plain HTML/CSS for controls, SVG for instrument faces and simple bounded-history plots, and Vite for bundling. No UI framework is required for this initial interface. [wasm-bindgen][wasm-bindgen] generates the Rust/JavaScript bridge and TypeScript declarations. [Three.js WebGLRenderer][three] uses WebGL 2; unsupported browsers should receive a clear message before simulation starts.
 
@@ -98,7 +98,7 @@ Switching modes or reversing the target must preserve angles and rates. Never cl
 
 ### 4.1 Data contract
 
-The native interface now implements the following types using enums and fixed-capacity storage. `SimulationConfig::for_preset` and `InitialState::for_preset` construct matching presets. Joint arrays have three slots: `[theta, psi, 0]` or `[alpha, beta, psi]`; the unused turn-indicator slot must be zero. Component poses follow chain order with identity in an unused slot. The WASM stage will serialize readable objects using `serde` and `serde-wasm-bindgen`; no serialization dependency is needed in the current native crate.
+The native interface implements the following types using enums and fixed-capacity storage. `SimulationConfig::for_preset` and `InitialState::for_preset` construct matching presets. Joint arrays have three slots: `[theta, psi, 0]` or `[alpha, beta, psi]`; the unused turn-indicator slot must be zero. Component poses follow chain order with identity in an unused slot. The WASM wrapper serializes readable objects using `serde` and `serde-wasm-bindgen`; serialization remains an optional feature of the native crate.
 
 | Type | Required content |
 |---|---|
@@ -131,11 +131,11 @@ Simulation::replay() -> Replay
 Simulation::from_replay(&replay) -> Result<Simulation, SimulationError>
 ```
 
-`gyro-wasm` exposes equivalent operations on a `GyroSimulation` object. The core has no concept of “real time” or “paused”; it advances only when called. The browser owns start/pause and converts wall-clock elapsed time into an integer number of steps.
+`gyro-wasm` exposes equivalent operations on a `GyroSimulation` object, except replay construction is split: `prepare_replay(replay)` validates/queues the log at step zero, then the caller advances to `end_step`. This allows cancellable reconstruction. `preset_definition(name)` supplies matching config/initial values. The [boundary types](../crates/gyro-wasm/src/bindings.d.ts) are included in the generated TypeScript declarations. The core has no concept of “real time” or “paused”; it advances only when called. The browser owns start/pause and converts wall-clock elapsed time into an integer number of steps.
 
 Commands execute in sequence order immediately before their designated step. Reject records for already completed steps and duplicate sequence numbers at the same step. Live events are assigned to the next unstarted step and recorded after that assignment. Same-step housing-target updates may be coalesced to the last target before logging; mode/target changes must retain their order. Stepping uses no ambient clock or random input.
 
-A replay contains a format version, config, initial state, ordered command records, and `end_step` (the number of completed steps). Pending/future commands are retained. The native `Replay` is an owned Rust value, not yet a JSON/file format. Raw valid target quaternion inputs are retained in the log and canonicalized at execution, avoiding repeated normalization changing replay rounding. Because a run's step size is fixed, a step index is an exact timestamp within that run; displayed time is `step_index * dt`. Configuration changes that alter `dt` begin a new run. Start/pause and camera changes do not affect the physical replay, while an input received during a pause is recorded at the next physical step.
+A replay contains a format version, config, initial state, ordered command records, and `end_step` (the number of completed steps). Pending/future commands are retained. The native `Replay` is an owned Rust value; the browser exports/imports its version-1 JSON representation. Raw valid target quaternion inputs are retained in the log and canonicalized at execution, avoiding repeated normalization changing replay rounding. JSON canonicalizes negative zero to zero; same-WASM replay is tested for exact equality of every serialized snapshot field. Because a run's step size is fixed, a step index is an exact timestamp within that run; displayed time is `step_index * dt`. Configuration changes that alter `dt` begin a new run. Start/pause and camera changes do not affect the physical replay, while an input received during a pause is recorded at the next physical step.
 
 Compared with stage 1, `set_target_spin` and `set_drive_mode` now return queued command records, not immediately updated snapshots. Commands, the follower controller, and the step commit atomically. A zero-size batch applies nothing. Reset clears the command log as well as state/work.
 
@@ -144,6 +144,10 @@ Compared with stage 1, `set_target_spin` and `set_drive_mode` now return queued 
 Reject non-finite inputs, nonpositive inertias or time steps, negative damping/stiffness/gains, mismatched coordinate counts, and invalid quaternions. Principal inertias must also satisfy the rigid-body triangle inequalities; equality is allowed for an ideal thin disc. Use diagonal gimbal inertias in the first API, with the preset defining their local axes.
 
 Normalize a finite nonzero input quaternion once; reject an effectively zero norm. The public wrapper returns a structured error rather than allowing a JavaScript conversion failure to trap the module.
+
+The implemented WASM boundary returns owned JSON-compatible objects through `serde-wasm-bindgen`. Incoming configs/commands/replays pass through JSON and `serde_json` with `float_roundtrip`, enforcing unknown-field rejection and bounded nesting without changing finite floating-point values. Non-finite numeric inputs become invalid nulls and cycles are rejected. Errors contain `kind`, `message`, and optional `step`. Browser-facing step/sequence indices are limited to JavaScript's maximum safe integer. `advance_steps` accepts only integer counts from 0 through 32,768; ordinary frames and replay reconstruction use at most 2,048 steps per batch.
+
+File import rejects files over 2 MB and logs over 50,000 commands. Reconstruction yields to browser events between batches, offers Cancel, and swaps in the candidate only after reaching its recorded end successfully. A failed or cancelled import keeps the previous run paused and intact. Large valid durations are not silently truncated. Exported runs exceeding the import limits require external processing rather than a promise of unbounded browser restoration.
 
 Each accepted step must have a finite state and valid normalized orientation. On factorization or numerical failure, retain the last accepted state, stop advancing, and surface the error. A failed step must not partly commit time, commands, or diagnostics. Display mechanical alignment and poor numerical conditioning as separate flags. Do not hide either with artificial gimbal damping or reset the gyro silently.
 
@@ -211,7 +215,7 @@ Retain unwrapped mechanical gimbal coordinates; a spring acts on the actual join
 | Playback speed | Simulation seconds advanced per wall-clock second | Equations, RPM, torques, and `dt` |
 | Visual spin marker | Drawing convention for the rotor texture/marker | All simulation state and time |
 
-Default playback speed is 1×, with 0.1×, 0.25×, 0.5×, and 2× options. Show simulation time and measured RPM together. At normal RPM use a blurred disc plus a spin-direction arrow; an optional marker may advance at 1/200 of measured spin and must say “rotor marker ×1/200”. Integrate that marker separately for display and never use it to calculate physical orientation or instrument readings.
+Default playback speed is 1×, with 0.1×, 0.25×, 0.5×, and 2× options. Show simulation time and measured RPM together. The implemented rotor is a symmetric disc; its optional spoke marker is drawn at phase `psi / 200` and labelled “rotor marker ×1/200”. Only the marker's rotation around the axisymmetric spindle is altered. The physical snapshot, spindle direction and instrument readings do not use this scaled phase. Disabling the marker leaves the symmetric disc, avoiding an apparent low physical RPM.
 
 ### 6.3 Browser scheduling and overload
 
@@ -320,13 +324,13 @@ flowchart LR
 
 Compile `gyro-wasm` as a `cdylib` with Cargo, then run `wasm-bindgen --target web` on the artifact. This target provides explicit browser initialization without assuming a bundler-native WASM module. Import the generated module from TypeScript and await initialization before enabling Start; ensure Vite includes the referenced `.wasm` file. The available binding targets are documented in the [wasm-bindgen deployment guide][wasm-deploy]. A separate `nodejs` binding output can run parity tests from the same compiled WASM.
 
-Commit `flake.lock`, `Cargo.lock`, `package-lock.json`, and an exact Rust toolchain selection when code is introduced. Pin the `wasm-bindgen` crate and CLI to exactly the same version. Pick mutually compatible dependency releases at implementation time; no executable lockfiles exist in this documentation deliverable. Keep generated bindings and bundle artifacts out of source control.
+`Cargo.lock`, `web/package-lock.json`, and the exact Rust 1.99.1 toolchain selection now accompany the implementation. The `wasm-bindgen` crate and CLI are both pinned to 0.2.129; the build script checks the compiler and CLI versions before generating web and Node bindings. Node 26.12.0/npm 12.2.1 were used for validation. Generated bindings and bundle artifacts are ignored. `flake.lock` and sandboxed Nix outputs remain stage-4 work; the current local build is not yet a reproducible Nix package.
 
 Nix must fetch Cargo and npm dependencies through declared, hashed inputs, then build without network access in the build sandbox. Use the same Rust toolchain for native tests and WASM compilation. The npm lock and selected Node version must agree. Do not run `rustup update`, `cargo install` against an unpinned release, or npm dependency resolution during a reproducible build. These packaging facilities are described in the [Nixpkgs manual][nixpkgs].
 
 ### 8.3 Planned developer commands
 
-Once implementation exists, the primary workflow will be:
+The current Cargo/npm workflow is in the README. Once the Nix stage exists, the primary workflow will be:
 
 ```sh
 nix develop
@@ -388,14 +392,18 @@ Benchmark the trial step with every preset, record hardware/browser and actual a
 
 The original paper reports numerical checks, but its code and fixtures are not present. New evidence is retained in [one-gimbal physics tests](../crates/gyro-core/tests/physics.rs), [two-gimbal tests](../crates/gyro-core/tests/two_gimbal.rs), [independent moving-housing energy tests](../crates/gyro-core/tests/energy_reference.rs), their [test-only differentiation oracle](../crates/gyro-core/tests/support/mod.rs), [control/replay tests](../crates/gyro-core/tests/controls.rs), and [lifecycle tests](../crates/gyro-core/tests/lifecycle.rs).
 
-Stages 1 and 2 pass their exact-reference, independent-energy, drive/coast, nutation, conservation, convergence, work-balance and replay criteria. The two-gimbal 60 s fixtures check energy against initial dynamic energy, plus both $h$ and $p_\alpha$; conservation maxima are sampled every 0.5 s. Nine 10 s fixtures compare the three presets under yaw, pitch and roll with nonzero initial gimbal motion, sampling differences at 256 Hz. Manual control tests cover finite acceleration, unit quaternions, rate monitoring, deterministic shortest paths including exactly $\pi$, work balance, script handover, and atomic failure. See the [README](../README.md#verify-the-implementation) for commands and measured values. Native same-build replay matches complete snapshots exactly across step batching. This does not yet establish browser performance, native/WASM parity, or a general validated operating envelope.
+Stages 1 and 2 pass their exact-reference, independent-energy, drive/coast, nutation, conservation, convergence, work-balance and replay criteria. The two-gimbal 60 s fixtures check energy against initial dynamic energy, plus both $h$ and $p_\alpha$; conservation maxima are sampled every 0.5 s. Nine 10 s fixtures compare the three presets under yaw, pitch and roll with nonzero initial gimbal motion, sampling differences at 256 Hz. Manual control tests cover finite acceleration, unit quaternions, rate monitoring, deterministic shortest paths including exactly $\pi$, work balance, script handover, and atomic failure. See the [README](../README.md#verify-the-implementation) for commands and measured values. Native same-build replay matches complete snapshots exactly across step batching. These fixtures do not establish a general validated operating envelope.
+
+Stage 3 adds [native/WASM parity fixtures](../crates/gyro-wasm/examples/parity_reference.rs) and their [comparison runner](../web/tests/parity.mjs): nine 10-second runs across all presets and positive, negative and zero initial RPM, sampled every 0.5 s. The runner compares angles, rates, component/housing orientations, momentum, energy and work, then tests owned snapshots, exact serialized WASM replay, malformed inputs, and finite alignment. A sign-independent quaternion chord distance below `1e-8` avoids `acos` cancellation near identical poses.
+
+Four [clock tests](../web/tests/scheduler.test.ts) isolate wall-time scheduling. Twelve [production-browser tests](../web/tests/browser/lab.spec.ts) cover assets/MIME/404s/local-only requests, paused dragging, camera isolation, lifecycle/hidden-tab/overload handling, frame-schedule equality, keyboard input, instrument signs, spin targets, settings validation, replay export/import/cancellation, initialization failure and undefined bank. They also record compute throughput and achieved playback including rendering. Desktop and mobile screenshots were inspected. This is Chromium/Linux evidence, not cross-browser certification or manual hardware-accelerated interaction testing. Performance observations and limitations are recorded in the README; no timestep is coarsened to improve a benchmark.
 
 ## 10. Implementation sequence and exit criteria
 
 1. **One-gimbal native core — complete:** shared kinematics/dynamics, integration, drive, and analytic yaw input. Exact one-gimbal reference, motor/coast, and small-rate response tests pass.
 2. **Two-gimbal and arbitrary motion — complete:** other chains, manual housing follower, diagnostics, and native replay. Fixed-housing reference, independent moving-housing checks, conservation, and convergence criteria pass for the selected fixtures.
-3. **WASM and browser:** expose the agreed interface, build the mechanism/dials/controls, and add lifecycle behavior. Exit when native/WASM parity, input/frame-rate independence, and browser acceptance cases pass.
-4. **Server and Nix package:** build pinned native/WASM/web outputs and package their assets. Exit when the flake checks pass and the complete application runs through `nix run` without external runtime dependencies.
+3. **WASM and browser — implemented:** shared Rust solver, owned typed boundary, mechanism/dials/controls, bounded clock, JSON replay and production-browser acceptance suite. Native/WASM parity and frame-schedule independence are checked with retained fixtures; manual cross-browser/hardware-accelerated assessment remains follow-up validation.
+4. **Server and Nix package — next:** the Axum asset server already serves the tested production bundle. Remaining work is pinned Nix native/WASM/web outputs, a working-directory-independent launcher and flake checks. Exit when the complete application runs through `nix run` without external runtime dependencies.
 5. **Later educational extensions:** specify and validate each added physical mechanism separately, including its new inputs and experiments. Erection and acceleration effects require a physical sensing model; Earth/transport effects require an extended reference-frame model.
 
 Dependency versions and the tested numerical parameter envelope are intentionally established with executable code. The architecture, physical conventions, first-release behavior, interface responsibilities, and acceptance process above are the implementation contract.

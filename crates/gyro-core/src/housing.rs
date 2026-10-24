@@ -2,6 +2,8 @@ use crate::SimulationError;
 use crate::math::{self, IDENTITY, axis_rotation, normalize_quaternion};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct HousingControllerConfig {
     pub position_gain: f64,
     pub rate_time_constant: f64,
@@ -61,6 +63,8 @@ impl HousingControllerConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum Axis {
     Roll,
     Pitch,
@@ -79,6 +83,8 @@ impl Axis {
 
 /// Quintic excursion from zero to an angle, a hold, then a smooth return to zero.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ExcursionProfile {
     pub axis: Axis,
     pub angle_rad: f64,
@@ -152,6 +158,8 @@ impl ExcursionProfile {
 
 /// Consistent instantaneous prescribed housing kinematics in world axes.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct HousingSample {
     pub orientation: [f64; 4],
     pub angular_velocity: [f64; 3],
@@ -187,6 +195,8 @@ impl HousingSample {
 
 /// Smooth yaw-rate ramp, constant-rate hold, ramp down, then rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct YawRateProfile {
     pub rate_rad_s: f64,
     pub ramp_seconds: f64,
@@ -264,6 +274,8 @@ impl YawRateProfile {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum HousingMotion {
     Fixed {
         orientation: [f64; 4],
@@ -351,6 +363,8 @@ impl HousingMotion {
 
 /// Script starts relative to the current housing orientation, at rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum Maneuver {
     Yaw {
         rate_rad_s: f64,

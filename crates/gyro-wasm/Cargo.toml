@@ -1,0 +1,20 @@
+[package]
+name = "gyro-wasm"
+description = "Owned, validated WebAssembly interface for gyro-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gyro-core = { path = "../gyro-core", features = ["serde"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde-wasm-bindgen = "=0.6.5"
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+js-sys = "=0.3.106"
+wasm-bindgen = "=0.2.129"
+
+[lints]
+workspace = true

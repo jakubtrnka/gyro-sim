@@ -43,12 +43,16 @@ impl fmt::Display for SimulationError {
 impl std::error::Error for SimulationError {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct RotorInertia {
     pub axial: f64,
     pub transverse: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct MotorConfig {
     pub gain: f64,
     pub torque_limit: f64,
@@ -57,6 +61,8 @@ pub struct MotorConfig {
 
 /// Serial joint axes are expressed in each joint's parent frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum Preset {
     #[default]
     TurnIndicator,
@@ -88,6 +94,8 @@ impl Preset {
 
 /// Mechanism and interaction parameters in SI units; immutable during a run.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SimulationConfig {
     pub preset: Preset,
     pub rotor: RotorInertia,
@@ -224,12 +232,16 @@ impl SimulationConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum DriveMode {
     Powered,
     Coast,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct DriveState {
     pub mode: DriveMode,
     /// Bearing-relative target angular velocity in rad/s, not RPM.
@@ -256,6 +268,8 @@ impl DriveState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct JointState {
     /// `[theta, psi, 0]` or `[alpha, beta, psi]`, unwrapped radians.
     pub angles: [f64; 3],
@@ -312,6 +326,8 @@ impl JointState {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct InitialState {
     pub joints: JointState,
     pub drive: DriveState,
@@ -331,6 +347,8 @@ impl InitialState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum InstrumentReading {
     TurnIndicator {
         deflection: f64,
@@ -346,6 +364,8 @@ pub enum InstrumentReading {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Diagnostics {
     pub kinetic_energy: f64,
     pub spring_energy: f64,
@@ -373,6 +393,8 @@ impl Diagnostics {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Evaluation {
     pub accelerations: [f64; 3],
     /// World-from-body, in chain order; unused slot is identity. Quaternions: xyzw.
@@ -382,6 +404,8 @@ pub struct Evaluation {
 
 /// Work integrals in joules, evaluated with the same RK4 stages as the state.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Work {
     pub housing: f64,
     pub motor: f64,
@@ -389,6 +413,8 @@ pub struct Work {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Snapshot {
     pub preset: Preset,
     /// Number of completed steps. Physical time is exactly this index times dt.
@@ -409,6 +435,8 @@ pub struct Snapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct AdvanceResult {
     pub previous: Snapshot,
     pub current: Snapshot,

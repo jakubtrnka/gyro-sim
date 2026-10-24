@@ -1,6 +1,8 @@
 use crate::{DriveMode, InitialState, Maneuver, SimulationConfig, SimulationError};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub enum Command {
     /// World-from-housing xyzw target. Never overwrites the physical pose.
     SetHousingTarget([f64; 4]),
@@ -40,6 +42,8 @@ impl Command {
 
 /// Executed just before step `step_index`, ordered by `sequence` within that step.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct CommandRecord {
     pub step_index: u64,
     pub sequence: u32,
@@ -49,6 +53,8 @@ pub struct CommandRecord {
 /// Owned, versioned native replay. Serialization belongs at the WASM boundary.
 /// Includes future/pending commands as well as those already applied.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Replay {
     pub version: u32,
     pub config: SimulationConfig,

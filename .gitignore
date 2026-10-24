@@ -1,4 +1,12 @@
 /target/
 /result
 /result-*
+/.tools/
+/web/node_modules/
+/web/dist/
+/web/generated/
+/web/test-results/
+/web/playwright-report/
+/web/.sites-runtime/
+/web/.workflow-metrics/
 

@@ -4,7 +4,7 @@ Educational derivation · 24 October 2026
 
 This document develops the physical model for an interactive aircraft-gyroscope demonstrator. Its companion, [Simulation design](02-simulation-design.md), specifies how to implement and present that model. The [original design paper](../gyroscope-simulation-design.md) is preserved as background.
 
-Each main topic starts with an observation a learner can make, then develops the mathematics needed to explain it. The conceptual passages assume basic ATPL instrument knowledge; the derivations additionally use vectors, differentiation, and matrices. The experiments describe the intended interactive simulator. A [native one-gimbal experiment](../README.md#run-the-native-experiment) is now available; the browser presentation and two-gimbal implementation are still to come.
+Each main topic starts with an observation a learner can make, then develops the mathematics needed to explain it. The conceptual passages assume basic ATPL instrument knowledge; the derivations additionally use vectors, differentiation, and matrices. The [interactive browser lab](../README.md#run-the-browser-lab) now implements all three mechanisms; [native command-line experiments](../README.md#try-the-attitude-and-directional-gyros) are also available. Later physical influences described below remain extensions unless explicitly identified as implemented.
 
 ## 1. What the learner should be able to explain
 
@@ -621,7 +621,7 @@ These are extensions, not effects that should be represented by arbitrary angle 
 
 The [implementation document](02-simulation-design.md#9-validation-and-acceptance) turns these into acceptance cases and separates approximation error from integration error.
 
-The original paper reports a 200-state comparison with automatic differentiation and an RK4 step-halving ratio of 16.04. Its supporting programs and fixtures are absent from this directory. Those are historical reported results, not evidence that the future Rust/WASM simulator has been validated. The new native one-gimbal implementation has separate [reproducible physics tests](../crates/gyro-core/tests/physics.rs), including 1,000 independently calculated acceleration references and integration checks. These validate the present native subset; they do not establish two-gimbal or WASM behavior.
+The original paper reports a 200-state comparison with automatic differentiation and an RK4 step-halving ratio of 16.04. Its supporting programs and fixtures are absent from this directory. Those are historical reported results, not evidence for the current implementation. Separate retained tests now cover [one-gimbal physics](../crates/gyro-core/tests/physics.rs), [two-gimbal physics](../crates/gyro-core/tests/two_gimbal.rs), [independent moving-housing energy derivatives](../crates/gyro-core/tests/energy_reference.rs), and [native/WASM parity](../web/tests/parity.mjs). The [README evidence summary](../README.md#verify-the-implementation) records their scope and measured values; selected fixtures do not establish a general parameter envelope or certified aircraft-instrument behavior.
 
 ## References
 
