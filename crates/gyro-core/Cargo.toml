@@ -1,0 +1,10 @@
+[package]
+name = "gyro-core"
+description = "Deterministic dynamics for educational aircraft gyroscope simulations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
