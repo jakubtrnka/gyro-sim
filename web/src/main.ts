@@ -81,6 +81,7 @@ class Lab {
   clock = new FixedClock(this.definition.config.step_seconds);
   view: MechanismView;
   pendingTarget: Quat | null = null;
+  homeHousing: Quat = [...this.current.housing.orientation];
   trace: Array<{ t: number; outer: number; inner: number }> = [];
   importToken = 0;
   busy = false;
@@ -132,10 +133,20 @@ class Lab {
       : "PAUSED · INSPECT THE MECHANISM";
   }
   adopt(definition: Definition, sim: GyroSimulation) {
+    // Ask the core for the true start pose, including imported profiles. Never
+    // infer it from Euler angles or use the final pose of a reconstructed replay.
+    const start = new GyroSimulation(definition.config, definition.initial);
+    let home: Quat;
+    try {
+      home = start.snapshot().housing.orientation;
+    } finally {
+      start.free();
+    }
     if (this.sim !== sim) this.sim.free();
     this.definition = structuredClone(definition);
     this.sim = sim;
     this.current = sim.snapshot();
+    this.homeHousing = home;
     this.previous = this.current;
     this.clock = new FixedClock(definition.config.step_seconds);
     this.clock.speed = Number(select("speed").value);
@@ -466,6 +477,14 @@ class Lab {
       );
     });
     click("stop-housing", () => this.queue("StopHousing"));
+    click("level-housing", () => {
+      this.queue({ SetHousingTarget: [...this.homeHousing] });
+      message(
+        this.clock.running
+          ? "Returning the housing smoothly to its starting orientation. Gyro motion, spin and elapsed time are preserved."
+          : "Starting housing orientation queued. Start or Step to return smoothly; the gyro has not been reset.",
+      );
+    });
     const mode = (move: boolean) => {
       this.view.setMode(move);
       button("move-mode").classList.toggle("selected", move);

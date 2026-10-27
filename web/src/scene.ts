@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import type { Preset, Quat, Snapshot } from "../generated/web/gyro_wasm";
 import { spinIndex } from "./display";
+import { aircraftSvg } from "./orientation";
 
 const X = new T.Vector3(1, 0, 0),
   Y = new T.Vector3(0, 1, 0),
@@ -56,7 +57,7 @@ function ring(
 }
 function disposeGroup(group: T.Group) {
   group.traverse((object) => {
-    if (object instanceof T.Mesh || object instanceof T.LineSegments) {
+    if (object instanceof T.Mesh || object instanceof T.Line) {
       object.geometry.dispose();
       for (const mat of Array.isArray(object.material)
         ? object.material
@@ -77,7 +78,8 @@ export class MechanismView {
   readonly inner = new T.Group();
   readonly rotor = new T.Group();
   readonly target = new T.Group();
-  readonly triad = document.createElement("div");
+  readonly forwardLabel = document.createElement("div");
+  readonly topLabel = document.createElement("div");
   readonly orbit: OrbitControls;
   readonly transform: TransformControls;
   readonly momentum = new T.ArrowHelper(
@@ -112,6 +114,9 @@ export class MechanismView {
   private observer: ResizeObserver;
   private onTarget: (q: Quat) => void;
   private onFailure: (message: string) => void;
+  private orientationKey = "";
+  private sceneWidth = 1;
+  private sceneHeight = 1;
 
   constructor(
     private container: HTMLElement,
@@ -126,10 +131,11 @@ export class MechanismView {
     this.renderer.outputColorSpace = T.SRGBColorSpace;
     this.renderer.domElement.setAttribute("aria-hidden", "true");
     container.prepend(this.renderer.domElement);
-    this.triad.style.cssText =
-      "position:absolute;right:16px;bottom:40px;width:90px;height:95px;pointer-events:none";
-    this.triad.setAttribute("aria-label", "World reference axes");
-    container.append(this.triad);
+    this.forwardLabel.className = "housing-label forward-label";
+    this.forwardLabel.textContent = "FWD";
+    this.topLabel.className = "housing-label top-label";
+    this.topLabel.textContent = "TOP";
+    container.append(this.forwardLabel, this.topLabel);
     this.root.quaternion.copy(conversion);
     this.scene.add(this.root);
     this.root.add(
@@ -167,7 +173,9 @@ export class MechanismView {
     );
     this.transform.setMode("rotate");
     this.transform.setSpace("local");
-    this.transform.setSize(0.8);
+    // Enlarge visible arcs AND their invisible picking volumes together.
+    this.transform.setSize(1.8);
+    this.transform.setColors(0xb65d4c, 0x44895c, 0x4f79b7, 0xd19a32);
     this.transform.attach(this.target);
     this.scene.add(this.transform.getHelper());
     this.transform.addEventListener("objectChange", () =>
@@ -176,7 +184,11 @@ export class MechanismView {
     this.transform.addEventListener("dragging-changed", (event) => {
       this.orbit.enableRotate =
         !event.value && !this.moveMode && !this.fixedHousing;
+      this.updateRotationHint();
     });
+    this.transform.addEventListener("axis-changed", () =>
+      this.updateRotationHint(),
+    );
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", (e) => {
       if (!this.moveMode || e.button !== 0 || this.transform.axis !== null)
@@ -187,6 +199,7 @@ export class MechanismView {
         pointer: e.pointerId,
       };
       canvas.setPointerCapture(e.pointerId);
+      this.updateRotationHint();
     });
     canvas.addEventListener("pointermove", (e) => {
       if (!this.arcball || this.arcball.pointer !== e.pointerId) return;
@@ -206,6 +219,7 @@ export class MechanismView {
     });
     const end = () => {
       this.arcball = null;
+      this.updateRotationHint();
     };
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
@@ -220,6 +234,28 @@ export class MechanismView {
     this.observer.observe(container);
     this.resize();
   }
+  private updateRotationHint() {
+    const hint = document.getElementById("rotation-feedback")!;
+    const label = this.arcball
+      ? "Free rotation"
+      : (
+          {
+            X: "Roll · x",
+            Y: "Pitch · y",
+            Z: "Yaw · z",
+            E: "View-axis rotation",
+            XYZE: "Free rotation",
+          } as Record<string, string>
+        )[this.transform.axis ?? ""];
+    hint.textContent = !this.moveMode
+      ? "Camera only · housing unchanged"
+      : label
+        ? `${label} · housing target`
+        : "Hover a ring: roll · pitch · yaw";
+    hint.classList.toggle("active", this.moveMode && !!label);
+    this.renderer.domElement.style.cursor =
+      this.arcball || this.transform.dragging ? "grabbing" : "grab";
+  }
   private ball(e: PointerEvent) {
     const box = this.renderer.domElement.getBoundingClientRect();
     const scale = Math.min(box.width, box.height);
@@ -232,8 +268,13 @@ export class MechanismView {
     ).normalize();
   }
   private resize() {
-    const { width, height } = this.container.getBoundingClientRect();
+    // Narrow screens reserve a footer for the aircraft reference, outside the
+    // 3D canvas. Use its CSS size for rendering, picking and projected labels.
+    const width = this.renderer.domElement.clientWidth;
+    const height = this.renderer.domElement.clientHeight;
     if (!width || !height) return;
+    this.sceneWidth = width;
+    this.sceneHeight = height;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
@@ -276,6 +317,26 @@ export class MechanismView {
         rail.position.set(0, y, z);
         this.housing.add(rail);
       }
+    // Asymmetric cues are fixed to the PHYSICAL housing, never the ghost target.
+    const cues = new T.Group();
+    cues.add(
+      new T.ArrowHelper(
+        X,
+        new T.Vector3(1.95, 0, 0),
+        0.65,
+        0x9b722d,
+        0.18,
+        0.12,
+      ),
+    );
+    const topEdge = new T.Mesh(
+      new T.BoxGeometry(0.12, 3.95, 0.12),
+      material(0x327c7d),
+    );
+    topEdge.position.set(1.95, 0, -1.95);
+    cues.add(topEdge);
+    cues.traverse((object) => (object.userData.orientationCue = true));
+    this.housing.add(cues);
     const ghost = new T.LineSegments(
       new T.EdgesGeometry(new T.BoxGeometry(4.02, 4.02, 4.02)),
       new T.LineDashedMaterial({
@@ -349,6 +410,7 @@ export class MechanismView {
     this.overlays = vectors;
     this.marker = marker;
     this.housing.traverse((object) => {
+      if (object.userData.orientationCue) return;
       if (object instanceof T.Mesh || object instanceof T.LineSegments) {
         const mat = object.material as T.Material;
         mat.transparent = transparent;
@@ -372,6 +434,8 @@ export class MechanismView {
     this.transform.getHelper().visible = move;
     this.target.visible = move;
     this.orbit.enableRotate = !move && !this.fixedHousing;
+    this.transform.axis = null;
+    this.updateRotationHint();
   }
   setCameraView(fixed: boolean) {
     this.fixedHousing = fixed;
@@ -379,6 +443,7 @@ export class MechanismView {
     if (!fixed) this.home();
   }
   home() {
+    this.camera.up.copy(Y);
     this.camera.position.set(4.8, 3.5, 6.5);
     this.orbit.target.set(0, 0, 0);
     this.camera.lookAt(0, 0, 0);
@@ -447,25 +512,39 @@ export class MechanismView {
       .clone()
       .invert()
       .multiply(conversion);
-    this.triad.innerHTML = `<svg viewBox="0 0 90 95" aria-hidden="true">${[
-      [X, "x"],
-      [Y, "y"],
-      [Z, "z"],
-    ]
-      .map(([axis, name]) => {
-        const v = (axis as T.Vector3).clone().applyQuaternion(cameraFromModel);
-        return `<path d="M45 40L${45 + v.x * 29} ${40 - v.y * 29}" stroke="#59776b" stroke-width="1.5"/><text x="${45 + v.x * 38}" y="${44 - v.y * 38}" text-anchor="middle" fill="#426158" font-size="10">${name}</text>`;
-      })
-      .join(
-        "",
-      )}<text x="45" y="92" text-anchor="middle" fill="#71877b" font-size="8">WORLD AXES</text></svg>`;
     this.renderer.render(this.scene, this.camera);
+    const key = [...s.housing.orientation, ...cameraFromModel.toArray()].join(
+      ",",
+    );
+    if (this.orientationKey !== key) {
+      document.getElementById("aircraft-view")!.innerHTML = aircraftSvg(
+        s.housing.orientation,
+        cameraFromModel,
+      );
+      this.orientationKey = key;
+    }
+    for (const [label, point] of [
+      [this.forwardLabel, new T.Vector3(2.72, 0, 0)],
+      [this.topLabel, new T.Vector3(1.95, 0, -2.1)],
+    ] as const) {
+      const projected = point
+        .applyQuaternion(this.housing.quaternion)
+        .applyQuaternion(conversion)
+        .project(this.camera);
+      label.hidden =
+        Math.abs(projected.x) > 0.94 ||
+        Math.abs(projected.y) > 0.9 ||
+        Math.abs(projected.z) > 1;
+      label.style.left = `${(0.5 + 0.5 * projected.x) * this.sceneWidth}px`;
+      label.style.top = `${(0.5 - 0.5 * projected.y) * this.sceneHeight}px`;
+    }
   }
   dispose() {
     this.observer.disconnect();
     this.transform.dispose();
     this.orbit.dispose();
     this.renderer.dispose();
-    this.triad.remove();
+    this.forwardLabel.remove();
+    this.topLabel.remove();
   }
 }

@@ -12,7 +12,7 @@
     "wasm": "node scripts/build-wasm.mjs",
     "check": "tsc --noEmit",
     "build": "npm run check && vite build && node scripts/copy-docs.mjs",
-    "test": "node --experimental-strip-types tests/scheduler.test.ts",
+    "test": "node --experimental-strip-types tests/scheduler.test.ts && node --experimental-strip-types tests/orientation.test.ts",
     "test:parity": "node tests/parity.mjs",
     "test:browser": "playwright test",
     "format": "prettier --write src scripts tests index.html *.json *.ts ../crates/gyro-wasm/src/bindings.d.ts",

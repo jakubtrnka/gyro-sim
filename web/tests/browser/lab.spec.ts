@@ -12,13 +12,17 @@ async function ready(page: any) {
 test("production assets, WASM MIME, local-only requests, docs and responsive view", async ({
   page,
   request,
+  baseURL,
 }) => {
   const errors: string[] = [];
   const external: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/*", (route) => {
     const url = route.request().url();
-    if (url.startsWith("http") && !url.startsWith("http://127.0.0.1:3000/")) {
+    if (
+      url.startsWith("http") &&
+      new URL(url).origin !== new URL(baseURL!).origin
+    ) {
       external.push(url);
       return route.abort();
     }
@@ -136,6 +140,183 @@ test("start, pause, single step, hidden-tab pause, overload and reset", async ({
   expect(await snapshot(page)).toEqual(hidden);
   await page.locator("#reset").click();
   expect((await snapshot(page)).step_index).toBe(0);
+});
+
+test("larger rotation rings expose named handles and rotate only the housing target", async ({
+  page,
+}) => {
+  await ready(page);
+  const initial = await snapshot(page);
+  const box = (await page.locator("#viewport canvas").boundingBox())!;
+  let handle: { x: number; y: number } | undefined;
+  // Pick from the expanded outer control region, outside the old ~40 px radius.
+  for (const radius of [0.18, 0.22, 0.26]) {
+    for (let angle = 0; angle < 2 * Math.PI; angle += Math.PI / 8) {
+      const point = {
+        x: box.x + box.width / 2 + box.height * radius * Math.cos(angle),
+        y: box.y + box.height / 2 + box.height * radius * Math.sin(angle),
+      };
+      await page.mouse.move(point.x, point.y);
+      if (
+        /^(Roll|Pitch|Yaw)/.test(
+          (await page.locator("#rotation-feedback").textContent())!,
+        )
+      ) {
+        handle = point;
+        break;
+      }
+    }
+    if (handle) break;
+  }
+  expect(handle).toBeDefined();
+  await expect(page.locator("#rotation-feedback")).toContainText(
+    "housing target",
+  );
+  await page.mouse.down();
+  await page.mouse.move(handle!.x + 24, handle!.y + 18, { steps: 8 });
+  await page.mouse.up();
+  expect(await snapshot(page)).toEqual(initial);
+  const commands = await page.evaluate(
+    () => (window as any).__gyroTest.replay().commands,
+  );
+  expect(commands.length).toBeGreaterThan(0);
+  expect(commands.at(-1).command.SetHousingTarget).not.toEqual([0, 0, 0, 1]);
+});
+
+test("aircraft reference follows actual housing and camera, not a paused ghost target", async ({
+  page,
+}) => {
+  await ready(page);
+  const art = page.locator("#aircraft-view [data-aircraft]");
+  const initialArt = await art.innerHTML();
+  await page.locator("#roll").fill("180");
+  await page.locator("#apply-pose").click();
+  expect(await art.innerHTML()).toBe(initialArt);
+  for (let i = 0; i < 4; i++)
+    await page.evaluate(() => (window as any).__gyroTest.advance(32768));
+  await expect(page.locator("#aircraft-view")).toContainText("Top faces down");
+  const invertedArt = await art.innerHTML();
+  expect(invertedArt).not.toBe(initialArt);
+  await page
+    .locator("#viewport")
+    .screenshot({ path: "/tmp/gyro-orientation-inverted.png" });
+  const before = await snapshot(page);
+  await page.locator("#orbit-mode").click();
+  const box = (await page.locator("#viewport canvas").boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.45);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.55, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect.poll(() => art.innerHTML()).not.toBe(invertedArt);
+  expect(await snapshot(page)).toEqual(before);
+  await page.selectOption("#camera-view", "housing");
+  await expect(page.locator("#aircraft-view")).toContainText("Top faces down");
+  expect(await snapshot(page)).toEqual(before);
+  await page
+    .locator("#viewport")
+    .screenshot({ path: "/tmp/gyro-orientation-housing-view.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("#level-housing")).toBeInViewport();
+  const inset = (await page.locator("#aircraft-inset").boundingBox())!;
+  const mobile = (await page.locator("#viewport").boundingBox())!;
+  const stage = (await page.locator("#viewport canvas").boundingBox())!;
+  expect(inset.x).toBeGreaterThan(mobile.x + mobile.width / 2);
+  expect(inset.x + inset.width).toBeLessThanOrEqual(mobile.x + mobile.width);
+  expect(inset.y).toBeGreaterThanOrEqual(stage.y + stage.height);
+  await page
+    .locator("#viewport")
+    .screenshot({ path: "/tmp/gyro-orientation-mobile.png" });
+});
+
+test("level housing preserves the running experiment and smoothly returns all presets", async ({
+  page,
+}) => {
+  await ready(page);
+  for (const preset of ["Attitude", "Directional", "TurnIndicator"]) {
+    await page.locator(`[data-preset=${preset}]`).click();
+    await page.evaluate(() =>
+      (window as any).__gyroTest.queue({
+        SetHousingTarget: [Math.sin(0.45), 0, 0, Math.cos(0.45)],
+      }),
+    );
+    await page.evaluate(() => (window as any).__gyroTest.advance(32768));
+    const before = await snapshot(page);
+    const log = await page.evaluate(() => (window as any).__gyroTest.replay());
+    await page.locator("#level-housing").click();
+    expect(await snapshot(page)).toEqual(before);
+    const queued = await page.evaluate(() =>
+      (window as any).__gyroTest.replay(),
+    );
+    expect(queued.end_step).toBe(log.end_step);
+    expect(queued.commands.slice(0, -1)).toEqual(log.commands);
+    expect(queued.commands.at(-1).command).toEqual({
+      SetHousingTarget: [0, 0, 0, 1],
+    });
+    await page.locator("#step").click();
+    const next = await snapshot(page);
+    expect(next.step_index).toBe(before.step_index + 1);
+    expect(next.drive).toEqual(before.drive);
+    const change = Math.hypot(
+      ...next.housing.orientation.map(
+        (x: number, i: number) => x - before.housing.orientation[i],
+      ),
+    );
+    expect(change).toBeLessThan(0.001);
+    expect(
+      Math.abs(next.joints.rates[preset === "TurnIndicator" ? 1 : 2]),
+    ).toBeGreaterThan(1000);
+    for (let i = 0; i < 3; i++)
+      await page.evaluate(() => (window as any).__gyroTest.advance(32768));
+    const after = await snapshot(page);
+    expect(Math.hypot(...after.housing.orientation.slice(0, 3))).toBeLessThan(
+      0.01,
+    );
+    expect(after.step_index).toBe(before.step_index + 1 + 3 * 32768);
+  }
+  const savedStep = (await snapshot(page)).step_index;
+  await page.locator("#play").click();
+  await page.locator("#level-housing").click();
+  await expect(page.locator("#play")).toHaveText("Ⅱ Pause");
+  expect((await snapshot(page)).step_index).toBeGreaterThanOrEqual(savedStep);
+  await page.locator("#play").click();
+});
+
+test("level housing returns to an imported run's original pose, not its replay end pose", async ({
+  page,
+}) => {
+  await ready(page);
+  const definition = await page.evaluate(() =>
+    (window as any).__gyroTest.definition(),
+  );
+  const home = [Math.sin(0.3), 0, 0, Math.cos(0.3)];
+  definition.initial.housing = { Fixed: { orientation: home } };
+  const replay = {
+    version: 1,
+    ...definition,
+    commands: [
+      {
+        step_index: 0,
+        sequence: 0,
+        command: { SetHousingTarget: [0, 0, 0, 1] },
+      },
+    ],
+    end_step: 32768,
+  };
+  await page.locator("#import-replay").setInputFiles({
+    name: "tilted-start.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(replay)),
+  });
+  await expect(page.locator("#status")).toContainText("Replay reconstructed");
+  const before = await snapshot(page);
+  expect(before.housing.orientation).not.toEqual(home);
+  await page.locator("#level-housing").click();
+  expect(await snapshot(page)).toEqual(before);
+  const log = await page.evaluate(() => (window as any).__gyroTest.replay());
+  const target = log.commands.at(-1).command.SetHousingTarget;
+  home.forEach((x, i) => expect(target[i]).toBeCloseTo(x, 12));
 });
 
 test("same commands at 30, 60 and 120 display Hz give identical WASM snapshots", async ({

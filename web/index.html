@@ -111,7 +111,26 @@
                 ><button id="home-camera" title="Restore the camera view">
                   ↺ View
                 </button>
+                <button
+                  id="level-housing"
+                  title="Smoothly return to this run's starting housing orientation; do not reset the gyro"
+                >
+                  Level housing
+                </button>
+                <span id="rotation-feedback"
+                  >Hover a ring: roll · pitch · yaw</span
+                >
               </div>
+              <aside
+                id="aircraft-inset"
+                class="aircraft-inset"
+                aria-label="Aircraft and housing orientation reference"
+              >
+                <strong>AIRCRAFT / HOUSING</strong>
+                <span>Actual pose · same view</span>
+                <div id="aircraft-view"></div>
+                <small>Light top · ochre underside</small>
+              </aside>
               <div class="viewport-bottom">
                 <span id="drag-hint"
                   >Drag to rotate the housing target · scroll to zoom</span

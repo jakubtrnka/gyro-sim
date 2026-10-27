@@ -157,6 +157,8 @@ Each accepted step must have a finite state and valid normalized orientation. On
 
 Use a visible rotation gizmo about the common pivot and a separate camera-orbit mode. Housing handles update a ghost target orientation; the actual housing mesh always displays the integrated pose. Label the controls “Move housing” and “Orbit camera”, and disable camera orbit while a housing handle is captured. Wheel zoom remains a camera operation.
 
+The rotation control is enlarged from the initial version (size 0.8 to 1.8), enlarging both its drawn rings and invisible picking volumes. Muted axis colours highlight on hover, with explicit Roll/Pitch/Yaw labels. The freely draggable background remains available. These handles manipulate the target, not an internal gimbal.
+
 The Rust core owns the target follower so native replay and browser execution receive identical physical motion. Let $u$ be the world-from-housing quaternion, $u_t$ its target, and $\boldsymbol e$ the shortest rotation vector of $u_tu^{-1}$, expressed in world axes. Choose quaternion sign so the error angle is in $[0,\pi]$; at exactly $\pi$, use a fixed lexicographic axis-sign tie break.
 
 Define `clip_norm` to preserve a vector's direction while limiting its magnitude. A concrete initial follower is
@@ -178,6 +180,8 @@ Start with $k_p=4\,\mathrm{s}^{-1}$, $\tau_h=0.2$ s, $\omega_{\max}=90^\circ$/s,
 Integrate the follower state alongside the joints in the same RK4 stages, evaluating the gyro with that stage's housing sample. Normalize stage quaternions for rotation evaluation and normalize the accepted quaternion. Pose and angular velocity remain continuous. Target commands can change acceleration at step boundaries; apply commands only there so no step crosses an unhandled input discontinuity.
 
 Releasing a handle leaves the last target in place, allowing the housing to settle smoothly. Moving a target while paused changes the ghost only until stepping resumes. The camera remains usable while paused.
+
+“Level housing” queues `SetHousingTarget` using the starting housing pose obtained from the core's initial snapshot. It preserves time, rotor/gimbal state, work integrals and command history, and takes over scripted motion through the normal continuous follower handover. It does not auto-start a paused run. For imported initial conditions that are tilted, the target remains that starting pose, not an assumed world-level identity quaternion. Replay reconstruction must retain this original reference rather than treating its reconstructed end pose as home.
 
 ### 5.2 Scripted inputs
 
@@ -254,7 +258,11 @@ $$
 
 Author component geometry in the model's local axes and place all model poses beneath a scene root with rotation $C$. A body's scene rotation is then $C R_i$, with its local mesh basis unchanged. Do not additionally conjugate each pose by $C$: that would apply a second basis conversion. Vector overlays and target handles use the same root.
 
-Show housing, gimbal rings, rotor, bearing axes, and a small labelled aircraft-axis triad. Use distinguishable colors plus labels, rather than color alone. Offer world-fixed and housing-fixed camera views, optional transparency, angular-momentum/torque arrows, and a compact trace panel. Show the axes even when they align so gimbal lock has a visible geometric explanation.
+Show housing, gimbal rings, rotor and bearing axes. Use distinguishable colors plus labels, rather than color alone. Offer world-fixed and housing-fixed camera views, optional transparency, angular-momentum/torque arrows, and a compact trace panel. Show the joint axes even when they align so gimbal lock has a visible geometric explanation.
+
+The box remains an unobstructed mechanism enclosure, with a physical-housing FWD arrow and labelled teal TOP edge. A corner aircraft reference replaces the original world-axis triad. It projects a small solid aircraft into SVG using `inverse(camera_rotation) * C * housing_rotation`, matching the main view's direction without another WebGL context or external assets. Upper surfaces are light and the underside is ochre; a vertical tail and nose marker make the shape asymmetric. A separate world-horizontal reference ring and world-up arrow do **not** rotate with the aircraft. Dot/cross symbols handle world up viewed end-on. Top-facing-up/down/vertical labels use the full housing quaternion, not a potentially ambiguous Euler decomposition.
+
+The aircraft reference uses the same displayed **physical housing** pose as the scene, never the target ghost or a gyro component. Camera orbit changes its projection but not its physical orientation. In housing-fixed view the aircraft appears fixed while the world reference moves. It is an orientation aid, not another simulated attitude instrument. It occupies a pointer-transparent corner on desktop and a reserved strip below the 3D canvas on narrow screens, avoiding occlusion of the mechanism or mouse handles.
 
 ### 7.2 Read the simulated mechanism
 
@@ -396,7 +404,7 @@ Stages 1 and 2 pass their exact-reference, independent-energy, drive/coast, nuta
 
 Stage 3 adds [native/WASM parity fixtures](../crates/gyro-wasm/examples/parity_reference.rs) and their [comparison runner](../web/tests/parity.mjs): nine 10-second runs across all presets and positive, negative and zero initial RPM, sampled every 0.5 s. The runner compares angles, rates, component/housing orientations, momentum, energy and work, then tests owned snapshots, exact serialized WASM replay, malformed inputs, and finite alignment. A sign-independent quaternion chord distance below `1e-8` avoids `acos` cancellation near identical poses.
 
-Four [clock tests](../web/tests/scheduler.test.ts) isolate wall-time scheduling. Twelve [production-browser tests](../web/tests/browser/lab.spec.ts) cover assets/MIME/404s/local-only requests, paused dragging, camera isolation, lifecycle/hidden-tab/overload handling, frame-schedule equality, keyboard input, instrument signs, spin targets, settings validation, replay export/import/cancellation, initialization failure and undefined bank. They also record compute throughput and achieved playback including rendering. Desktop and mobile screenshots were inspected. This is Chromium/Linux evidence, not cross-browser certification or manual hardware-accelerated interaction testing. Performance observations and limitations are recorded in the README; no timestep is coarsened to improve a benchmark.
+Four [clock tests](../web/tests/scheduler.test.ts) isolate wall-time scheduling; four [aircraft-projection tests](../web/tests/orientation.test.ts) check orientation conventions, camera composition, finite geometry, inversion and end-on world-up symbols. Sixteen [production-browser tests](../web/tests/browser/lab.spec.ts) cover assets/MIME/404s/local-only requests, larger named rotation handles, paused dragging, camera isolation, aircraft-reference/ghost separation, smooth leveling and imported start poses, lifecycle/hidden-tab/overload handling, frame-schedule equality, keyboard input, instrument signs, spin targets, settings validation, replay export/import/cancellation, initialization failure and undefined bank. They also record compute throughput and achieved playback including rendering. Desktop and mobile screenshots were inspected. This is Chromium/Linux evidence, not cross-browser certification or manual hardware-accelerated interaction testing. Performance observations and limitations are recorded in the README; no timestep is coarsened to improve a benchmark.
 
 ## 10. Implementation sequence and exit criteria
 

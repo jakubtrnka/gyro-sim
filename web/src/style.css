@@ -331,15 +331,79 @@ fieldset {
   display: flex;
   gap: 4px;
   z-index: 3;
+  right: 16px;
+  flex-wrap: wrap;
+  pointer-events: none;
 }
 .view-controls button {
   font-size: 10px;
   padding: 6px 9px;
   background: #ffffffc7;
   backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 .view-controls button.selected {
   background: #d8e4dd;
+}
+#rotation-feedback {
+  flex-basis: 100%;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #61766e;
+}
+#rotation-feedback.active {
+  color: #855c22;
+}
+.aircraft-inset {
+  position: absolute;
+  right: 14px;
+  bottom: 46px;
+  width: 160px;
+  padding: 10px 5px 7px;
+  border: 1px solid #d3dfd6;
+  border-radius: 8px;
+  background: #f8faf5ef;
+  text-align: center;
+  z-index: 2;
+  pointer-events: none;
+}
+.aircraft-inset strong {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  color: #426365;
+}
+.aircraft-inset > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 8px;
+  color: #71847b;
+}
+.aircraft-inset svg {
+  display: block;
+  width: 100%;
+}
+.aircraft-inset small {
+  display: block;
+  font-size: 8px;
+  color: #71847b;
+}
+.housing-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+  padding: 2px 4px;
+  font-size: 9px;
+  font-weight: 650;
+  border-radius: 3px;
+  background: #f8faf5df;
+}
+.forward-label {
+  color: #87602b;
+}
+.top-label {
+  color: #327c7d;
 }
 .viewport-bottom {
   position: absolute;
@@ -888,6 +952,51 @@ footer div {
     gap: 12px;
   }
 }
+@media (max-width: 600px) {
+  #viewport {
+    height: 538px;
+    min-height: 538px;
+  }
+  #viewport canvas {
+    height: calc(100% - 138px);
+  }
+  #viewport::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 138px;
+    border-top: 1px solid #d3dfd6;
+    background: #f1f5ef;
+    pointer-events: none;
+  }
+  .viewport-bottom {
+    right: 136px;
+    flex-direction: column;
+  }
+  .view-controls {
+    left: 10px;
+    right: 10px;
+  }
+  .view-controls button {
+    padding: 6px;
+  }
+  .aircraft-inset {
+    width: 112px;
+    right: 8px;
+    bottom: 7px;
+    padding-top: 7px;
+  }
+  .aircraft-inset strong {
+    font-size: 7px;
+    letter-spacing: 0.3px;
+  }
+  .aircraft-inset > span,
+  .aircraft-inset small {
+    font-size: 7px;
+  }
+}
 @media (max-width: 460px) {
   .mobile-break {
     display: block;
@@ -929,8 +1038,8 @@ footer div {
     gap: 5px;
   }
   #viewport {
-    min-height: 350px;
-    height: 350px;
+    min-height: 488px;
+    height: 488px;
   }
   .compact-label {
     font-size: 0;
