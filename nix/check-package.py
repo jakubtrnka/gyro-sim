@@ -94,6 +94,25 @@ with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryFile(mode="w+
         base = address.group()
         # Do not let host proxy settings redirect local requests.
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # Nix gives different builds the same file timestamp. A browser with an
+        # older page must receive the current body, not a misleading 304.
+        cached_assets = [assets / "index.html", *assets.rglob("*.css")]
+        for asset in cached_assets:
+            relative = asset.relative_to(assets)
+            for method in ["GET", "HEAD"]:
+                request = urllib.request.Request(
+                    f"{base}/{relative}",
+                    headers={"If-Modified-Since": "Thu, 01 Jan 1970 00:00:01 GMT"},
+                    method=method,
+                )
+                with client.open(request, timeout=5) as response:
+                    assert response.status == 200, relative
+                    assert response.headers.get("Cache-Control") == "no-store"
+                    assert response.headers.get("Last-Modified") is None
+                    if asset.suffix == ".css":
+                        assert response.headers.get_content_type() == "text/css"
+                    expected = asset.read_bytes() if method == "GET" else b""
+                    assert response.read() == expected, relative
         for relative in [
             "index.html",
             "README.md",
