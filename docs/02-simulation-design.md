@@ -349,6 +349,12 @@ nix run
 
 The flake interface requires the Nix `nix-command` and `flakes` features. `nix develop` supplies tools; it does not silently modify source files or start services. `nix build` builds the native server and browser bundle; `nix run` starts the packaged server. A development script may rebuild WASM and run Vite for rapid frontend iteration, while packaged acceptance always tests the Axum-served production bundle.
 
+### 8.4 GitHub CI and static hosting
+
+The GitHub Actions workflow runs the flake checks and builds `.#web` on pushes and pull requests. After successful checks on `main`, it uploads that static artifact and deploys it to GitHub Pages. The repository must select GitHub Actions as its Pages publishing source. Deployment uses the `github-pages` environment and a separate job with Pages/OIDC permissions; pull requests cannot deploy.
+
+The static artifact contains the browser application, WASM, and documentation; Axum is needed only for local serving. Relative Vite asset URLs and document links allow the same artifact to run at `/`, `/gyro-sim/`, or on a custom domain. `checks.browser-pages` repeats the browser acceptance suite with assets available only under `/gyro-sim/`, checking WASM loading, navigation, documentation, and simulation behavior. `checks.workflows` validates the workflow with actionlint.
+
 ## 9. Validation and acceptance
 
 ### 9.1 Numerical reference cases

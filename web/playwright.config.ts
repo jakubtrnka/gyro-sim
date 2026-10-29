@@ -3,7 +3,12 @@ import { existsSync } from "node:fs";
 const port = Number(process.env.GYRO_TEST_PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("GYRO_TEST_PORT must be an integer from 1 to 65535");
-const baseURL = `http://127.0.0.1:${port}`;
+const basePath = process.env.GYRO_TEST_BASE_PATH ?? "/";
+if (!/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(basePath))
+  throw new Error(
+    "GYRO_TEST_BASE_PATH must be a directory path such as /gyro-sim/",
+  );
+const baseURL = `http://127.0.0.1:${port}${basePath}`;
 export default defineConfig({
   testDir: "./tests/browser",
   fullyParallel: false,

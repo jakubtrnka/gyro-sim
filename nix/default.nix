@@ -50,6 +50,7 @@ let
       ../web/index.html
       ../web/tsconfig.json
       ../web/playwright.config.ts
+      ../web/vite.config.ts
       ../web/src
       ../web/scripts
       ../web/tests
@@ -208,6 +209,19 @@ let
     installPhase = "touch $out";
   };
 
+  browser-pages = browser.overrideAttrs {
+    pname = "gyro-pages-browser-checks";
+    GYRO_TEST_BASE_PATH = "/gyro-sim/";
+    buildPhase = ''
+      runHook preBuild
+      mkdir -p web/dist target/release
+      # The server requires a root index; only the repository subpath has assets.
+      touch web/dist/index.html
+      cp -r ${web} web/dist/gyro-sim
+      ln -s ${lib.getExe server} target/release/gyro-server
+      runHook postBuild
+    '';
+  };
 in
 {
   packages = {
@@ -233,7 +247,24 @@ in
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
   };
   checks = {
-    inherit native web browser;
+    inherit
+      native
+      web
+      browser
+      browser-pages
+      ;
+    workflows =
+      pkgs.runCommand "gyro-workflow-check"
+        {
+          nativeBuildInputs = [
+            pkgs.actionlint
+            pkgs.shellcheck
+          ];
+        }
+        ''
+          actionlint ${../.github/workflows/ci.yml}
+          touch "$out"
+        '';
     package = pkgs.runCommand "gyro-package-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
       python ${./check-package.py} ${lib.getExe package} ${web} ${src}
       touch "$out"
