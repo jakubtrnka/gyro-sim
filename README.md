@@ -74,6 +74,8 @@ Building documentation diagrams also requires Chromium. The Nix shell supplies i
 
 The server accepts `--bind`, `--port`, and `--assets`; the default bind is loopback. An absolute `--assets` path allows launching from another directory. After building, `./target/release/gyro-server --assets web/dist` starts it without Cargo. Stop with Ctrl+C.
 
+The local server disables browser caching so restarting with a new build always serves the current HTML and styles. Nix normalizes file timestamps across builds, so filesystem modification dates cannot safely validate cached pages. GitHub Pages manages its own caching independently.
+
 The build script checks the exact Rust version and matching wasm-bindgen CLI. It accepts a matching compiler directly on `PATH`, otherwise selects the pinned rustup toolchain or an installed `stable` of exactly the same version. `WASM_BINDGEN` may select an existing CLI and `GYRO_RUST_TOOLCHAIN` explicitly selects an equivalent named rustup toolchain. `CARGO_TARGET_DIR` is respected when locating the WASM artifact. If a host compiler-cache wrapper fails, prefix Cargo/WASM/parity commands with `RUSTC_WRAPPER=` without changing the global Cargo configuration. After dependencies are cached, `CARGO_NET_OFFLINE=true npm --prefix web run wasm` rebuilds offline.
 
 For frontend iteration, build WASM first and run `npm --prefix web run dev`. Vite serves the development UI; rendered documentation and acceptance tests use the Axum-served production bundle. Rebuild WASM after Rust changes, and rebuild the web bundle after frontend or documentation changes.
