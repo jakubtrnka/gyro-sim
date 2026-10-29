@@ -113,7 +113,7 @@ let
         ../web/package-lock.json
       ];
     };
-    hash = "sha256-IB5L8p4DcGdsA6PJCflF41EPf10vH7ILwrf7VZXoiKc=";
+    hash = "sha256-aWtBTHrCgGo4QU5fqHMciH0r6XqHIZZJ5Ke+XxxFBtI=";
   };
   web = pkgs.buildNpmPackage {
     pname = "gyro-web";
@@ -125,6 +125,10 @@ let
       ;
     npmRoot = "web";
     env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+    nativeBuildInputs = [ pkgs.chromium ];
+    CHROMIUM_PATH = lib.getExe pkgs.chromium;
+    # Documentation diagrams are rendered to SVG inside the build sandbox.
+    FONTCONFIG_FILE = fontsConf;
     postPatch = ''
       cp -r ${wasm} web/generated
     '';
@@ -189,10 +193,6 @@ let
 
   browser = web.overrideAttrs {
     pname = "gyro-browser-checks";
-    nativeBuildInputs = web.nativeBuildInputs ++ [ pkgs.chromium ];
-    CHROMIUM_PATH = lib.getExe pkgs.chromium;
-    # The build sandbox has no host fonts or /etc/fonts configuration.
-    FONTCONFIG_FILE = fontsConf;
     buildPhase = ''
       runHook preBuild
       cp -r ${web} web/dist

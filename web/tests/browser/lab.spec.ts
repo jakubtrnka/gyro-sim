@@ -43,6 +43,8 @@ test("production assets, WASM MIME, local-only requests, docs and responsive vie
   expect((await wasm).headers()["content-type"]).toContain("application/wasm");
   expect((await request.get("./missing-asset.js")).status()).toBe(404);
   for (const path of [
+    "./docs/01-gyroscope-mechanics.html",
+    "./docs/02-simulation-design.html",
     "./docs/01-gyroscope-mechanics.md",
     "./docs/02-simulation-design.md",
     "./gyroscope-simulation-design.md",
@@ -56,11 +58,13 @@ test("production assets, WASM MIME, local-only requests, docs and responsive vie
   expect(
     await page.locator("a.brand").evaluate((a: HTMLAnchorElement) => a.href),
   ).toBe(baseURL);
-  for (const href of await page
-    .locator('a[href$=".md"]')
+  const documentLinks = await page
+    .locator('a[href$=".html"]')
     .evaluateAll((links) =>
       links.map((link) => (link as HTMLAnchorElement).href),
-    )) {
+    );
+  expect(documentLinks).toHaveLength(3);
+  for (const href of documentLinks) {
     expect(href.startsWith(baseURL!)).toBe(true);
     expect((await request.get(href)).status()).toBe(200);
   }
