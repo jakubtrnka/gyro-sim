@@ -4,7 +4,7 @@ Educational derivation · 24 October 2026
 
 This document develops the physical model for an interactive aircraft-gyroscope demonstrator. Its companion, [Simulation design](02-simulation-design.md), specifies how to implement and present that model. The [original design paper](../gyroscope-simulation-design.md) is preserved as background.
 
-Each main topic starts with an observation a learner can make, then develops the mathematics needed to explain it. The conceptual passages assume basic ATPL instrument knowledge; the derivations additionally use vectors, differentiation, and matrices. The [interactive browser lab](../README.md#run-the-browser-lab) now implements all three mechanisms; [native command-line experiments](../README.md#try-the-attitude-and-directional-gyros) are also available. Later physical influences described below remain extensions unless explicitly identified as implemented.
+Each main topic starts with an observation a learner can make, then develops the mathematics needed to explain it. The conceptual passages assume basic ATPL instrument knowledge; the derivations additionally use vectors, differentiation, and matrices. The [interactive browser lab](../README.md#run-the-browser-lab-without-nix) now implements all three mechanisms; [native command-line experiments](../README.md#try-the-attitude-and-directional-gyros) are also available. Later physical influences described below remain extensions unless explicitly identified as implemented.
 
 ## 1. What the learner should be able to explain
 

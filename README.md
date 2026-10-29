@@ -53,6 +53,8 @@ To enable publishing:
 
 GitHub Pages serves HTML, JavaScript, CSS, WASM, and the bundled documentation. The simulation runs entirely in the browser, so Pages does not need the local Axum server. Vite uses relative asset URLs, and navigation/documentation links are relative too; the same `.#web` artifact works locally, under a repository path, or on a custom domain. See [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) for repository settings and deployment permissions.
 
+The web build renders the mechanics, simulation design, project guide, and original proposal from Markdown into styled HTML. KaTeX renders equations with bundled fonts; Mermaid diagrams become inline SVG during the build using Chromium. The documentation includes navigation and a table of contents, works without JavaScript or external downloads, and preserves links between documents and heading anchors. Original Markdown and linked source examples remain available alongside the HTML.
+
 ## Run the browser lab without Nix
 
 From the repository root, with rustup and Node/npm installed:
@@ -68,11 +70,13 @@ cargo run --release --locked -p gyro-server -- --assets web/dist
 
 Open **http://127.0.0.1:3000**. Tested with Rust 1.99.1, wasm-bindgen 0.2.129, Node 26.12.0, npm 12.2.1 and Chromium 156 on x86_64 Linux. Initial dependency/toolchain installation needs network access; the built application uses only local assets, with no CDN or server-side simulation. WebGL 2 is required. No hosted deployment is created.
 
+Building documentation diagrams also requires Chromium. The Nix shell supplies it automatically. Outside Nix, use `/usr/bin/chromium`, set `CHROMIUM_PATH` to your Chromium executable, or run `npx playwright install chromium` from `web/` before building. Chromium is only a build dependency; the resulting documentation is static HTML, CSS, and SVG.
+
 The server accepts `--bind`, `--port`, and `--assets`; the default bind is loopback. An absolute `--assets` path allows launching from another directory. After building, `./target/release/gyro-server --assets web/dist` starts it without Cargo. Stop with Ctrl+C.
 
 The build script checks the exact Rust version and matching wasm-bindgen CLI. It accepts a matching compiler directly on `PATH`, otherwise selects the pinned rustup toolchain or an installed `stable` of exactly the same version. `WASM_BINDGEN` may select an existing CLI and `GYRO_RUST_TOOLCHAIN` explicitly selects an equivalent named rustup toolchain. `CARGO_TARGET_DIR` is respected when locating the WASM artifact. If a host compiler-cache wrapper fails, prefix Cargo/WASM/parity commands with `RUSTC_WRAPPER=` without changing the global Cargo configuration. After dependencies are cached, `CARGO_NET_OFFLINE=true npm --prefix web run wasm` rebuilds offline.
 
-For frontend iteration, build WASM first and run `npm --prefix web run dev`. Vite serves the development UI; documentation downloads and acceptance tests use the Axum-served production bundle. Rebuild WASM after Rust changes, and rebuild the web bundle after frontend or documentation changes.
+For frontend iteration, build WASM first and run `npm --prefix web run dev`. Vite serves the development UI; rendered documentation and acceptance tests use the Axum-served production bundle. Rebuild WASM after Rust changes, and rebuild the web bundle after frontend or documentation changes.
 
 ## Explore an experiment
 
