@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
-import { rustToolchain } from "../scripts/toolchain.mjs";
+import { rustToolchainArgs } from "../scripts/toolchain.mjs";
 const require = createRequire(import.meta.url);
 const {
   GyroSimulation,
@@ -11,7 +11,7 @@ const {
 const native = spawnSync(
   "cargo",
   [
-    `+${rustToolchain()}`,
+    ...rustToolchainArgs(),
     "run",
     "--release",
     "--locked",

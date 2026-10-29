@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { rustToolchain, workspaceRoot as root } from "./toolchain.mjs";
+import { rustToolchainArgs, workspaceRoot as root } from "./toolchain.mjs";
 
-const toolchain = rustToolchain();
+const toolchainArgs = rustToolchainArgs();
 const cli =
   process.env.WASM_BINDGEN ??
   (existsSync(path.join(root, ".tools/wasm-bindgen/bin/wasm-bindgen"))
@@ -20,7 +20,7 @@ if (version.stdout?.trim() !== "wasm-bindgen 0.2.129")
     "Install wasm-bindgen-cli 0.2.129; see README. Crate and CLI versions must match.",
   );
 run("cargo", [
-  `+${toolchain}`,
+  ...toolchainArgs,
   "build",
   "--release",
   "--locked",
@@ -29,9 +29,10 @@ run("cargo", [
   "--target",
   "wasm32-unknown-unknown",
 ]);
-const wasm = path.join(
+const wasm = path.resolve(
   root,
-  "target/wasm32-unknown-unknown/release/gyro_wasm.wasm",
+  process.env.CARGO_TARGET_DIR ?? "target",
+  "wasm32-unknown-unknown/release/gyro_wasm.wasm",
 );
 for (const target of ["web", "nodejs"]) {
   const directory = path.join(root, "web/generated", target);
