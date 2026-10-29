@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 const snapshot = (page: any) =>
   page.evaluate(() => (window as any).__gyroTest.snapshot());
 async function ready(page: any) {
-  await page.goto("/?test");
+  await page.goto("./?test");
   await expect(page.locator("#play")).toBeEnabled();
   await expect(page.locator("#status")).toContainText("Ready.");
 }
@@ -15,15 +15,16 @@ test("production assets, WASM MIME, local-only requests, docs and responsive vie
   baseURL,
 }) => {
   const errors: string[] = [];
-  const external: string[] = [];
+  const outsideSite: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/*", (route) => {
     const url = route.request().url();
     if (
       url.startsWith("http") &&
-      new URL(url).origin !== new URL(baseURL!).origin
+      (new URL(url).origin !== new URL(baseURL!).origin ||
+        !new URL(url).pathname.startsWith(new URL(baseURL!).pathname))
     ) {
-      external.push(url);
+      outsideSite.push(url);
       return route.abort();
     }
     return route.continue();
@@ -33,18 +34,29 @@ test("production assets, WASM MIME, local-only requests, docs and responsive vie
   );
   await ready(page);
   expect((await wasm).headers()["content-type"]).toContain("application/wasm");
-  expect((await request.get("/missing-asset.js")).status()).toBe(404);
+  expect((await request.get("./missing-asset.js")).status()).toBe(404);
   for (const path of [
-    "/docs/01-gyroscope-mechanics.md",
-    "/docs/02-simulation-design.md",
-    "/gyroscope-simulation-design.md",
-    "/README.md",
-    "/crates/gyro-core/tests/physics.rs",
-    "/crates/gyro-wasm/src/bindings.d.ts",
-    "/crates/gyro-wasm/examples/parity_reference.rs",
-    "/web/tests/browser/lab.spec.ts",
+    "./docs/01-gyroscope-mechanics.md",
+    "./docs/02-simulation-design.md",
+    "./gyroscope-simulation-design.md",
+    "./README.md",
+    "./crates/gyro-core/tests/physics.rs",
+    "./crates/gyro-wasm/src/bindings.d.ts",
+    "./crates/gyro-wasm/examples/parity_reference.rs",
+    "./web/tests/browser/lab.spec.ts",
   ])
     expect((await request.get(path)).status()).toBe(200);
+  expect(
+    await page.locator("a.brand").evaluate((a: HTMLAnchorElement) => a.href),
+  ).toBe(baseURL);
+  for (const href of await page
+    .locator('a[href$=".md"]')
+    .evaluateAll((links) =>
+      links.map((link) => (link as HTMLAnchorElement).href),
+    )) {
+    expect(href.startsWith(baseURL!)).toBe(true);
+    expect((await request.get(href)).status()).toBe(200);
+  }
   expect((await snapshot(page)).step_index).toBe(0);
   await page.screenshot({ path: "/tmp/gyro-lab-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -54,7 +66,7 @@ test("production assets, WASM MIME, local-only requests, docs and responsive vie
     ),
   ).toBe(true);
   await page.screenshot({ path: "/tmp/gyro-lab-mobile.png", fullPage: true });
-  expect(external).toEqual([]);
+  expect(outsideSite).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -460,7 +472,7 @@ test("initialization failure leaves controls disabled with an explanation", asyn
   page,
 }) => {
   await page.route("**/*.wasm", (route) => route.abort());
-  await page.goto("/");
+  await page.goto("./");
   await expect(page.locator("#status")).toContainText("Could not start");
   await expect(page.locator("#play")).toBeDisabled();
 });

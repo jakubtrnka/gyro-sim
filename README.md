@@ -39,6 +39,20 @@ The shell provides Chromium through `CHROMIUM_PATH` and the matching CLI through
 
 Use `nix fmt flake.nix nix/default.nix` to format the Nix definitions. To update build tools deliberately, run `nix flake update` and rerun `nix flake check`; the wasm-bindgen CLI must still match `Cargo.lock`. After changing `web/package-lock.json`, replace the `npmDeps` hash in `nix/default.nix` with `lib.fakeHash`, run `nix build .#web`, then set the reported `got: sha256-…` hash and rebuild. Add new source files to Git so Git-backed flakes include them. See the [Nix flake documentation](https://nix.dev/concepts/flakes) for feature setup and lockfile behavior.
 
+## GitHub CI and Pages
+
+`.github/workflows/ci.yml` runs `nix flake check` and builds `.#web` on branch pushes, pull requests targeting `main`, and manual runs. The checks include the full Chromium suite both at `/` and at `/gyro-sim/`, plus workflow validation with actionlint. The workflow uses pinned Action revisions and the committed Nix lockfile on an x86_64 Ubuntu runner.
+
+After checks pass on `main`, the same workflow uploads the tested static bundle and deploys it through the `github-pages` environment. Pull requests and other branches only run CI. Only the deployment job has Pages write permission; no personal access token or external cache account is required.
+
+To enable publishing:
+
+1. In the repository's **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**.
+2. Commit and push the Nix and workflow files to `main` (or merge them through a pull request).
+3. Watch **Actions → CI and Pages**. After the first successful deployment, the site is available at **https://jakubtrnka.github.io/gyro-sim/** unless a custom domain is configured. Later pushes to `main` update it automatically; **Run workflow** on `main` can redeploy it.
+
+GitHub Pages serves HTML, JavaScript, CSS, WASM, and the bundled documentation. The simulation runs entirely in the browser, so Pages does not need the local Axum server. Vite uses relative asset URLs, and navigation/documentation links are relative too; the same `.#web` artifact works locally, under a repository path, or on a custom domain. See [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) for repository settings and deployment permissions.
+
 ## Run the browser lab without Nix
 
 From the repository root, with rustup and Node/npm installed:
