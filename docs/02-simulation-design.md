@@ -2,7 +2,7 @@
 
 Implementation specification · 24 October 2026
 
-This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). Stages 1–3 are implemented: `gyro-core` supplies all three mechanisms and deterministic replay; `gyro-wasm` exposes that solver to the interactive Three.js browser lab. The small Axum asset server was brought forward to test the production bundle. Nix packaging remains next. See the [project README](../README.md) for build commands, controls and reproducible evidence. The [original paper](../gyroscope-simulation-design.md) remains available as background.
+This document specifies the application built from [Gyroscope mechanics](01-gyroscope-mechanics.md). Stages 1–4 are implemented: `gyro-core` supplies all three mechanisms and deterministic replay; `gyro-wasm` exposes that solver to the interactive Three.js browser lab. The Axum asset server and pinned Nix packages provide a local, bundled application. See the [project README](../README.md) for build commands, controls and reproducible evidence. The [original paper](../gyroscope-simulation-design.md) remains available as background.
 
 ## 1. Intended behavior and scope
 
@@ -332,13 +332,13 @@ flowchart LR
 
 Compile `gyro-wasm` as a `cdylib` with Cargo, then run `wasm-bindgen --target web` on the artifact. This target provides explicit browser initialization without assuming a bundler-native WASM module. Import the generated module from TypeScript and await initialization before enabling Start; ensure Vite includes the referenced `.wasm` file. The available binding targets are documented in the [wasm-bindgen deployment guide][wasm-deploy]. A separate `nodejs` binding output can run parity tests from the same compiled WASM.
 
-`Cargo.lock`, `web/package-lock.json`, and the exact Rust 1.99.1 toolchain selection now accompany the implementation. The `wasm-bindgen` crate and CLI are both pinned to 0.2.129; the build script checks the compiler and CLI versions before generating web and Node bindings. Node 26.12.0/npm 12.2.1 were used for validation. Generated bindings and bundle artifacts are ignored. `flake.lock` and sandboxed Nix outputs remain stage-4 work; the current local build is not yet a reproducible Nix package.
+`Cargo.lock`, `web/package-lock.json`, `flake.lock`, and the exact Rust 1.99.1 toolchain selection accompany the implementation. The `wasm-bindgen` crate and CLI are both pinned to 0.2.129; the flake asserts their versions match. The build script accepts the exact compiler directly from Nix or through rustup before generating web and Node bindings. The locked Nixpkgs provides Node 26.12.1; Node 26.12.0/npm 12.2.1 were used for the earlier non-Nix validation. Generated bindings and bundle artifacts are ignored and excluded from Nix sources.
 
 Nix must fetch Cargo and npm dependencies through declared, hashed inputs, then build without network access in the build sandbox. Use the same Rust toolchain for native tests and WASM compilation. The npm lock and selected Node version must agree. Do not run `rustup update`, `cargo install` against an unpinned release, or npm dependency resolution during a reproducible build. These packaging facilities are described in the [Nixpkgs manual][nixpkgs].
 
-### 8.3 Planned developer commands
+### 8.3 Developer commands
 
-The current Cargo/npm workflow is in the README. Once the Nix stage exists, the primary workflow will be:
+The primary workflow is below; the README also retains the Cargo/npm workflow:
 
 ```sh
 nix develop
@@ -411,7 +411,7 @@ Four [clock tests](../web/tests/scheduler.test.ts) isolate wall-time scheduling;
 1. **One-gimbal native core — complete:** shared kinematics/dynamics, integration, drive, and analytic yaw input. Exact one-gimbal reference, motor/coast, and small-rate response tests pass.
 2. **Two-gimbal and arbitrary motion — complete:** other chains, manual housing follower, diagnostics, and native replay. Fixed-housing reference, independent moving-housing checks, conservation, and convergence criteria pass for the selected fixtures.
 3. **WASM and browser — implemented:** shared Rust solver, owned typed boundary, mechanism/dials/controls, bounded clock, JSON replay and production-browser acceptance suite. Native/WASM parity and frame-schedule independence are checked with retained fixtures; manual cross-browser/hardware-accelerated assessment remains follow-up validation.
-4. **Server and Nix package — next:** the Axum asset server already serves the tested production bundle. Remaining work is pinned Nix native/WASM/web outputs, a working-directory-independent launcher and flake checks. Exit when the complete application runs through `nix run` without external runtime dependencies.
+4. **Server and Nix package — implemented:** pinned native/WASM/web outputs, a working-directory-independent launcher, a development shell, and flake checks for native physics, parity, frontend, Chromium acceptance, packaged serving, documentation links and Nix formatting. `nix run` builds and serves the complete local application without external runtime dependencies. ARM64 outputs await validation on a matching builder.
 5. **Later educational extensions:** specify and validate each added physical mechanism separately, including its new inputs and experiments. Erection and acceleration effects require a physical sensing model; Earth/transport effects require an extended reference-frame model.
 
 Dependency versions and the tested numerical parameter envelope are intentionally established with executable code. The architecture, physical conventions, first-release behavior, interface responsibilities, and acceptance process above are the implementation contract.

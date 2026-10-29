@@ -2,9 +2,44 @@
 
 An interactive 3D teaching lab for mechanical aircraft gyroscopes: one-gimbal turn indicator, two-gimbal attitude reference and directional gyro. Rust computes finite-inertia dynamics in WebAssembly; Three.js displays the exposed mechanism alongside simplified instrument faces. Dragging requests a housing orientation that a smooth Rust controller follows—it never teleports the gyro.
 
-Stages 1–3 are implemented, along with the local Axum asset server brought forward for browser acceptance testing. Nix packaging is the next stage; there is no flake yet. See the [implementation sequence](docs/02-simulation-design.md#10-implementation-sequence-and-exit-criteria).
+The native solver, browser lab, local Axum asset server, and Nix packaging are implemented. See the [implementation sequence](docs/02-simulation-design.md#10-implementation-sequence-and-exit-criteria).
 
-## Run the browser lab
+## Build and run with Nix
+
+From the repository root, with Nix's `nix-command` and `flakes` features enabled:
+
+```sh
+nix run
+```
+
+Open **http://127.0.0.1:3000** and stop with Ctrl+C. Nix builds the Rust server, WASM bindings, and production web bundle using the committed locks. The launcher supplies an immutable asset path, so it works from any directory and needs no runtime dependency downloads. Initial builds need network access to fetch pinned inputs and dependencies.
+
+```sh
+nix build                         # result/bin/gyro-sim and result/share/gyro-sim/web
+./result/bin/gyro-sim --port 3107
+nix run . -- --bind 127.0.0.1 --port 3107
+nix flake check                   # native, parity, frontend, browser, packaging, formatting
+nix develop                       # pinned Rust/WASM, wasm-bindgen, Node/npm, Chromium
+```
+
+Individual build outputs are `nix build .#server`, `nix build .#wasm`, and `nix build .#web`. The WASM output contains `web/` and `nodejs/` bindings; the web output is ready to serve. The default package's launcher also accepts `--assets` to serve an explicitly chosen directory. Use an absolute flake path to launch from elsewhere, e.g. `nix run /path/to/gyro-sim`.
+
+The flake defines `x86_64-linux` and `aarch64-linux` outputs; validation is performed on x86_64 Linux. ARM64 requires validation on a matching builder. `flake.lock` pins Nixpkgs and rust-overlay; `rust-toolchain.toml` selects Rust 1.99.1 including the WASM target. The locked Nixpkgs provides wasm-bindgen 0.2.129 and Node 26.12.1. Builds fetch Cargo dependencies by their lockfile checksums and npm dependencies by a fixed hash, then compile and test in the Nix sandbox.
+
+For development, entering the shell does not install project dependencies or start services:
+
+```sh
+nix develop
+npm --prefix web ci
+npm --prefix web run wasm
+npm --prefix web run dev
+```
+
+The shell provides Chromium through `CHROMIUM_PATH` and the matching CLI through `WASM_BINDGEN`; rustup is not required. Rebuild WASM after Rust changes. To run production browser tests in this shell, run `npm --prefix web run build`, `cargo build --release --locked -p gyro-server`, then `npm --prefix web run test:browser`.
+
+Use `nix fmt flake.nix nix/default.nix` to format the Nix definitions. To update build tools deliberately, run `nix flake update` and rerun `nix flake check`; the wasm-bindgen CLI must still match `Cargo.lock`. After changing `web/package-lock.json`, replace the `npmDeps` hash in `nix/default.nix` with `lib.fakeHash`, run `nix build .#web`, then set the reported `got: sha256-…` hash and rebuild. Add new source files to Git so Git-backed flakes include them. See the [Nix flake documentation](https://nix.dev/concepts/flakes) for feature setup and lockfile behavior.
+
+## Run the browser lab without Nix
 
 From the repository root, with rustup and Node/npm installed:
 
@@ -21,7 +56,7 @@ Open **http://127.0.0.1:3000**. Tested with Rust 1.99.1, wasm-bindgen 0.2.129, N
 
 The server accepts `--bind`, `--port`, and `--assets`; the default bind is loopback. An absolute `--assets` path allows launching from another directory. After building, `./target/release/gyro-server --assets web/dist` starts it without Cargo. Stop with Ctrl+C.
 
-The build script checks the exact Rust version and matching wasm-bindgen CLI. It prefers the pinned toolchain; an installed `stable` of exactly the same version is also accepted. `WASM_BINDGEN` may select an existing CLI and `GYRO_RUST_TOOLCHAIN` an equivalent named toolchain. If a host compiler-cache wrapper fails, prefix Cargo/WASM/parity commands with `RUSTC_WRAPPER=` without changing the global Cargo configuration. After dependencies are cached, `CARGO_NET_OFFLINE=true npm --prefix web run wasm` rebuilds offline.
+The build script checks the exact Rust version and matching wasm-bindgen CLI. It accepts a matching compiler directly on `PATH`, otherwise selects the pinned rustup toolchain or an installed `stable` of exactly the same version. `WASM_BINDGEN` may select an existing CLI and `GYRO_RUST_TOOLCHAIN` explicitly selects an equivalent named rustup toolchain. `CARGO_TARGET_DIR` is respected when locating the WASM artifact. If a host compiler-cache wrapper fails, prefix Cargo/WASM/parity commands with `RUSTC_WRAPPER=` without changing the global Cargo configuration. After dependencies are cached, `CARGO_NET_OFFLINE=true npm --prefix web run wasm` rebuilds offline.
 
 For frontend iteration, build WASM first and run `npm --prefix web run dev`. Vite serves the development UI; documentation downloads and acceptance tests use the Axum-served production bundle. Rebuild WASM after Rust changes, and rebuild the web bundle after frontend or documentation changes.
 
