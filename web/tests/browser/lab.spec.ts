@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 const snapshot = (page: any) =>
@@ -7,6 +7,13 @@ async function ready(page: any) {
   await page.goto("./?test");
   await expect(page.locator("#play")).toBeEnabled();
   await expect(page.locator("#status")).toContainText("Ready.");
+}
+
+async function readyWithClock(page: Page) {
+  // Slow software rendering must not introduce overload pauses into UI tests.
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+  await ready(page);
+  await page.clock.pauseAt(new Date("2026-01-01T01:00:00Z"));
 }
 
 test("production assets, WASM MIME, local-only requests, docs and responsive view", async ({
@@ -115,16 +122,16 @@ test("dragging moves only the queued ghost until stepping; orbit does not change
 test("start, pause, single step, hidden-tab pause, overload and reset", async ({
   page,
 }) => {
-  await ready(page);
+  await readyWithClock(page);
   await page.locator("#step").click();
   expect((await snapshot(page)).step_index).toBe(1);
   await page.locator("#play").click();
-  await expect
-    .poll(async () => (await snapshot(page)).step_index)
-    .toBeGreaterThan(1);
+  await page.clock.runFor(100);
+  expect((await snapshot(page)).step_index).toBeGreaterThan(1);
+  await expect(page.locator("#play")).toHaveText("Ⅱ Pause");
   await page.locator("#play").click();
   const paused = await snapshot(page);
-  await page.waitForTimeout(100);
+  await page.clock.runFor(100);
   expect(await snapshot(page)).toEqual(paused);
   await page.locator("#play").click();
   await page.evaluate(() => {
@@ -136,7 +143,7 @@ test("start, pause, single step, hidden-tab pause, overload and reset", async ({
   });
   await expect(page.locator("#play")).toHaveText("▶ Start");
   const hidden = await snapshot(page);
-  await page.waitForTimeout(100);
+  await page.clock.runFor(100);
   expect(await snapshot(page)).toEqual(hidden);
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", {
@@ -145,11 +152,17 @@ test("start, pause, single step, hidden-tab pause, overload and reset", async ({
     });
     document.dispatchEvent(new Event("visibilitychange"));
   });
+  await page.clock.runFor(100);
   expect(await snapshot(page)).toEqual(hidden);
-  expect(
-    await page.evaluate(() => (window as any).__gyroTest.overload()),
-  ).toEqual({ steps: 0, overloaded: true });
-  expect(await snapshot(page)).toEqual(hidden);
+  await page.locator("#play").click();
+  await page.clock.runFor(100);
+  const beforeOverload = await snapshot(page);
+  await page.clock.fastForward(1000);
+  await expect(page.locator("#play")).toHaveText("▶ Start");
+  await expect(page.locator("#status")).toContainText(
+    "Playback paused: the browser fell behind.",
+  );
+  expect(await snapshot(page)).toEqual(beforeOverload);
   await page.locator("#reset").click();
   expect((await snapshot(page)).step_index).toBe(0);
 });
@@ -245,7 +258,7 @@ test("aircraft reference follows actual housing and camera, not a paused ghost t
 test("level housing preserves the running experiment and smoothly returns all presets", async ({
   page,
 }) => {
-  await ready(page);
+  await readyWithClock(page);
   for (const preset of ["Attitude", "Directional", "TurnIndicator"]) {
     await page.locator(`[data-preset=${preset}]`).click();
     await page.evaluate(() =>
@@ -289,9 +302,13 @@ test("level housing preserves the running experiment and smoothly returns all pr
   }
   const savedStep = (await snapshot(page)).step_index;
   await page.locator("#play").click();
+  await page.clock.runFor(100);
+  const runningStep = (await snapshot(page)).step_index;
+  expect(runningStep).toBeGreaterThan(savedStep);
   await page.locator("#level-housing").click();
   await expect(page.locator("#play")).toHaveText("Ⅱ Pause");
-  expect((await snapshot(page)).step_index).toBeGreaterThanOrEqual(savedStep);
+  await page.clock.runFor(100);
+  expect((await snapshot(page)).step_index).toBeGreaterThan(runningStep);
   await page.locator("#play").click();
 });
 
@@ -548,10 +565,22 @@ test("record achieved playback rate including rendering", async ({ page }) => {
     await page.locator("#play").click();
     const start = Date.now();
     await page.waitForTimeout(2200);
-    const overloaded = !(await page.locator("#play").textContent())?.includes(
-      "Pause",
-    );
-    if (!overloaded) await page.locator("#play").click();
+    // Observe and stop in one browser task so an overload cannot turn a pause
+    // click into an accidental restart between reading the label and clicking.
+    const overloaded = await page
+      .locator("#play")
+      .evaluate((button: HTMLButtonElement) => {
+        const running = button.textContent?.includes("Pause") ?? false;
+        if (running) button.click();
+        return !running;
+      });
+    if (overloaded) {
+      // A busy runner can pause before its first step; retain that measurement
+      // while checking that the stop was the intended overload protection.
+      await expect(page.locator("#status")).toContainText(
+        "Playback paused: the browser fell behind.",
+      );
+    }
     const s = await snapshot(page);
     const times = await page.evaluate(() => {
       const state = window as any;
@@ -566,7 +595,7 @@ test("record achieved playback rate including rendering", async ({ page }) => {
       fps,
       overloaded,
     });
-    expect(s.step_index).toBeGreaterThan(0);
+    if (!overloaded) expect(s.step_index).toBeGreaterThan(0);
   }
   console.log(
     "Achieved playback including software-rendered scene:",
